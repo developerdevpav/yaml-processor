@@ -1,0 +1,28 @@
+spring:
+  application:
+    name: yaml-processor
+  
+  # Настройки для работы с YAML файлами
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+    default-property-inclusion: NON_NULL
+  
+  # Настройки Thymeleaf
+  thymeleaf:
+    prefix: classpath:/templates/
+    suffix: .html
+    mode: HTML
+    encoding: UTF-8
+    cache: false
+
+# Настройки приложения
+app:
+  yaml:
+    directory: ./yaml-files
+    schema-file: ./schema.json
+
+# Настройки сервера
+server:
+  port: 8080
+  servlet:
+    context-path: /

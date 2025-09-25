@@ -1,0 +1,393 @@
+:root {
+    --black: #000000;
+    --white: #ffffff;
+    --gray-100: #f8f9fa;
+    --gray-200: #e9ecef;
+    --gray-300: #dee2e6;
+    --gray-400: #ced4da;
+    --gray-500: #adb5bd;
+    --gray-600: #6c757d;
+    --gray-700: #495057;
+    --gray-800: #343a40;
+    --gray-900: #212529;
+}
+
+* {
+    font-family: 'Inter', sans-serif;
+}
+
+body {
+    background: var(--white);
+    color: var(--black);
+    min-height: 100vh;
+}
+
+.navbar {
+    background: var(--white) !important;
+    border-bottom: 1px solid var(--black);
+}
+
+.navbar-brand {
+    font-weight: 400;
+    font-size: 1.5rem;
+    color: var(--black);
+}
+
+.nav-link {
+    color: var(--gray-700) !important;
+    font-weight: 400;
+    transition: all 0.2s ease;
+    position: relative;
+}
+
+.nav-link:hover {
+    color: var(--black) !important;
+}
+
+.nav-link::after {
+    content: '';
+    position: absolute;
+    width: 0;
+    height: 1px;
+    bottom: -5px;
+    left: 50%;
+    background: var(--black);
+    transition: all 0.2s ease;
+    transform: translateX(-50%);
+}
+
+.nav-link:hover::after {
+    width: 100%;
+}
+
+.container {
+    position: relative;
+    z-index: 1;
+}
+
+.main-card {
+    background: var(--white);
+    border: 1px solid var(--black);
+    margin-top: 2rem;
+    overflow: hidden;
+}
+
+.page-header {
+    background: var(--black);
+    color: var(--white);
+    padding: 1.5rem;
+    margin: -1px -1px 0 -1px;
+}
+
+.page-header h2 {
+    font-weight: 400;
+    margin: 0;
+    font-size: 1.5rem;
+}
+
+.btn-modern {
+    background: var(--white);
+    border: 1px solid var(--black);
+    padding: 8px 16px;
+    font-weight: 400;
+    color: var(--black);
+    transition: all 0.2s ease;
+    text-decoration: none;
+    display: inline-block;
+}
+
+.btn-modern:hover {
+    background: var(--black);
+    color: var(--white);
+    text-decoration: none;
+}
+
+.btn-secondary-modern {
+    background: var(--white);
+    border: 1px solid var(--black);
+    padding: 8px 16px;
+    font-weight: 400;
+    color: var(--black);
+    transition: all 0.2s ease;
+    text-decoration: none;
+    display: inline-block;
+}
+
+.btn-secondary-modern:hover {
+    background: var(--black);
+    color: var(--white);
+    text-decoration: none;
+}
+
+.file-card {
+    background: var(--white);
+    border: 1px solid var(--black);
+    transition: all 0.2s ease;
+    position: relative;
+}
+
+.file-card:hover {
+    border-color: var(--gray-500);
+}
+
+.file-icon {
+    width: 40px;
+    height: 40px;
+    background: var(--white);
+    border: 1px solid var(--black);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 1rem;
+    transition: all 0.2s ease;
+}
+
+.file-card:hover .file-icon {
+    background: var(--black);
+    color: var(--white);
+}
+
+.file-title {
+    font-weight: 400;
+    color: var(--black);
+    margin-bottom: 0.5rem;
+    font-size: 1rem;
+}
+
+.file-description {
+    color: var(--gray-600);
+    font-size: 0.875rem;
+}
+
+.btn-group-modern {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+
+.btn-action {
+    border: 1px solid var(--black);
+    padding: 4px 8px;
+    font-weight: 400;
+    font-size: 0.75rem;
+    transition: all 0.2s ease;
+    background: var(--white);
+    color: var(--black);
+    text-decoration: none;
+    display: inline-block;
+}
+
+.btn-view:hover {
+    background: var(--black);
+    color: var(--white);
+    text-decoration: none;
+}
+
+.btn-edit:hover {
+    background: var(--gray-800);
+    color: var(--white);
+    text-decoration: none;
+}
+
+.btn-delete:hover {
+    background: var(--black);
+    color: var(--white);
+    text-decoration: none;
+}
+
+.empty-state {
+    text-align: center;
+    padding: 3rem 2rem;
+    color: var(--gray-600);
+}
+
+.empty-icon {
+    width: 80px;
+    height: 80px;
+    background: var(--white);
+    border: 1px solid var(--black);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 1.5rem;
+}
+
+.empty-icon i {
+    font-size: 2rem;
+    color: var(--black);
+}
+
+.alert-modern {
+    border: 1px solid var(--black);
+}
+
+.alert-success {
+    background: var(--white);
+    color: var(--black);
+    border-color: var(--black);
+}
+
+.alert-danger {
+    background: var(--white);
+    color: var(--black);
+    border-color: var(--black);
+}
+
+.modal-content {
+    background: var(--white);
+    border: 1px solid var(--black);
+}
+
+.modal-header {
+    border-bottom: 1px solid var(--black);
+}
+
+.modal-footer {
+    border-top: 1px solid var(--black);
+}
+
+.btn-close {
+    filter: none;
+}
+
+.form-section {
+    background: var(--white);
+    border: 1px solid var(--black);
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+    transition: all 0.2s ease;
+}
+
+.form-section:hover {
+    border-color: var(--gray-500);
+}
+
+.form-section h5 {
+    color: var(--black);
+    margin-bottom: 1rem;
+    font-weight: 400;
+    position: relative;
+}
+
+.form-section h5::after {
+    content: '';
+    position: absolute;
+    bottom: -4px;
+    left: 0;
+    width: 30px;
+    height: 1px;
+    background: var(--black);
+}
+
+.form-label {
+    color: var(--black);
+    font-weight: 400;
+    margin-bottom: 0.5rem;
+}
+
+.form-control, .form-select {
+    background: var(--white);
+    border: 1px solid var(--black);
+    color: var(--black);
+    padding: 8px 12px;
+    transition: all 0.2s ease;
+}
+
+.form-control:focus, .form-select:focus {
+    background: var(--white);
+    border-color: var(--gray-500);
+    box-shadow: none;
+    color: var(--black);
+}
+
+.form-control::placeholder {
+    color: var(--gray-500);
+}
+
+.form-check-input {
+    background: var(--white);
+    border: 1px solid var(--black);
+}
+
+.form-check-input:checked {
+    background: var(--black);
+    border-color: var(--black);
+}
+
+.form-check-label {
+    color: var(--black);
+    font-weight: 400;
+}
+
+.array-item {
+    background: var(--white);
+    border: 1px solid var(--black);
+    padding: 1rem;
+    margin-bottom: 1rem;
+    transition: all 0.2s ease;
+    position: relative;
+}
+
+.array-item:hover {
+    border-color: var(--gray-500);
+}
+
+.array-item-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.array-item-header h6 {
+    color: var(--black);
+    font-weight: 400;
+    margin: 0;
+}
+
+.remove-item-btn {
+    background: var(--white);
+    border: 1px solid var(--black);
+    padding: 4px 8px;
+    color: var(--black);
+    transition: all 0.2s ease;
+}
+
+.remove-item-btn:hover {
+    background: var(--black);
+    color: var(--white);
+}
+
+.btn-add {
+    background: var(--white);
+    border: 1px solid var(--black);
+    padding: 6px 12px;
+    color: var(--black);
+    font-weight: 400;
+    transition: all 0.2s ease;
+}
+
+.btn-add:hover {
+    background: var(--black);
+    color: var(--white);
+}
+
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(30px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.fade-in-up {
+    animation: fadeInUp 0.6s ease-out;
+}
+
+.stagger-1 { animation-delay: 0.1s; }
+.stagger-2 { animation-delay: 0.2s; }
+.stagger-3 { animation-delay: 0.3s; }
+.stagger-4 { animation-delay: 0.4s; }

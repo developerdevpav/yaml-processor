@@ -1,0 +1,408 @@
+{
+    "$schema": "http://json-schema.org/draft-06/schema#",
+    "$ref": "#/definitions/ProcessConfig",
+    "definitions": {
+        "ProcessConfig": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "process": {
+                    "$ref": "#/definitions/Process"
+                }
+            },
+            "required": [
+                "process"
+            ],
+            "title": "ProcessConfig"
+        },
+        "Process": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "context-code": {
+                    "$ref": "#/definitions/ContextCodes"
+                },
+                "disabled": {
+                    "type": "boolean",
+                    "default": false
+                },
+                "description": {
+                    "type": "string"
+                },
+                "subprocess": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/Subprocess"
+                    }
+                }
+            },
+            "required": [
+                "description",
+                "subprocess"
+            ],
+            "title": "Process"
+        },
+        "Subprocess": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "context-code": {
+                    "$ref": "#/definitions/ContextCodes"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "disabled": {
+                    "type": "boolean",
+                    "default": false
+                },
+                "trigger": {
+                    "$ref": "#/definitions/Trigger"
+                },
+                "stages": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/Stage"
+                    }
+                }
+            },
+            "required": [
+                "description",
+                "stages",
+                "trigger"
+            ],
+            "title": "Subprocess"
+        },
+        "Stage": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "id": {
+                    "type": "boolean"
+                },
+                "executor": {
+                    "type": "string"
+                },
+                "log": {
+                    "description": "Сервис журнала устанавливаемый при старте стадии",
+                    "$ref": "#/definitions/Log"
+                },
+                "context-code": {
+                    "$ref": "#/definitions/ContextCodes"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "configurator": {
+                    "$ref": "#/definitions/Configurator"
+                }
+            },
+            "required": [
+                "configurator",
+                "description",
+                "executor"
+            ],
+            "title": "Stage"
+        },
+        "Configurator": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "disabled": {
+                    "type": "boolean",
+                    "default": false
+                },
+                "interrupted": {
+                    "type": "boolean",
+                    "default": true
+                },
+                "multiple": {
+                    "type": "boolean",
+                    "default": false
+                },
+                "audit": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean",
+                            "default": false
+                        },
+                        "event-code": {
+                            "type": "string"
+                        },
+                        "event-description": {
+                            "type": "string"
+                        }
+                    },
+                    "required": [
+                        "enabled",
+                        "event-code",
+                        "event-description"
+                    ],
+                    "title": "audit"
+                },
+                "filter-event-rule": {
+                    "type": "string"
+                },
+                "result": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/Result"
+                    }
+                }
+            },
+            "required": [
+                "filter-event-rule"
+            ],
+            "title": "Configurator"
+        },
+        "Result": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "input-scenarios": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "reverse": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/Reverse"
+                    }
+                }
+            },
+            "required": [
+                "input-scenarios",
+                "reverse"
+            ],
+            "title": "Result"
+        },
+        "Reverse": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "status": {
+                    "$ref": "#/definitions/B3Status"
+                },
+                "output": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/ReverseOutput"
+                    }
+                }
+            },
+            "required": [
+                "output",
+                "status"
+            ],
+            "title": "Reverse"
+        },
+        "B3Status": {
+            "enum": [
+                "INITIATED",
+                "CANCELLED",
+                "ACCEPTED",
+                "STARTED",
+                "RUNNING",
+                "DATA_WAITING",
+                "EVENT_WAITING",
+                "PAUSED",
+                "POSITIVE_ENDING",
+                "NEUTRAL_ENDING",
+                "NEGATIVE_ENDING",
+                "SKIPPED",
+                "IS_ROLLING_BACK",
+                "HAS_ROLLED_BACK",
+                "FAULT",
+                "HOLD"
+            ]
+        },
+        "ReverseOutput": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "phase": {
+                    "$ref": "#/definitions/ActionPhases"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "rule": {
+                    "type": "string"
+                },
+                "body": {
+                    "$ref": "#/definitions/Body"
+                },
+                "log": {
+                    "$ref": "#/definitions/EventLog"
+                }
+            },
+            "required": [
+                "body",
+                "log",
+                "phase"
+            ],
+            "title": "Output"
+        },
+        "ActionPhases": {
+            "enum": [
+                "CHANGE_BUSINESS_STAGE",
+                "CHECK_IN",
+                "START",
+                "BUSINESS_COMPLETE",
+                "ACTIVITY_COMPLETE",
+                "COMPLETE_FAILURE"
+            ]
+        },
+        "SlaStatus": {
+            "enum": [
+                "INIT",
+                "STARTED",
+                "RE_ESTIMATED",
+                "EXPIRED"
+            ]
+        },
+        "ContextCodes": {
+            "enum": [
+                "PSPLUS",
+                "C7M",
+                "VRKLDS",
+                "OFZHN",
+                "FZHN",
+                "OGRNT",
+                "GA_NPA",
+                "REDZONE",
+                "CHANGE",
+                "LEASING"
+            ]
+        },
+        "Body": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "event-object": {
+                    "$ref": "#/definitions/EventObject"
+                },
+                "service": {
+                    "$ref": "#/definitions/Service"
+                },
+                "type": {
+                    "type": "string"
+                }
+            },
+            "title": "Body"
+        },
+        "SlaState": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "status": {
+                    "$ref": "#/definitions/SlaStatus"
+                },
+                "durationValue": {
+                    "type": "integer"
+                },
+                "durationUnit": {
+                    "$ref": "#/definitions/SlaDurationUnit"
+                }
+            },
+            "title": "SlaState"
+        },
+        "SlaDurationUnit": {
+            "enum": [
+                "DAYS",
+                "WORKING_DAYS",
+                "HOURS",
+                "WORKING_HOURS",
+                "MINUTES",
+                "SECONDS"
+            ]
+        },
+        "EventObject": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "type": {
+                    "type": "string"
+                }
+            },
+            "required": [
+                "type"
+            ],
+            "title": "EventObject"
+        },
+        "Service": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "scenario": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "sla": {
+                    "$ref": "#/definitions/SlaState"
+                }
+            },
+            "required": [
+                "scenario"
+            ],
+            "title": "Service"
+        },
+        "Log": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "journal-service-name": {
+                    "description": "Название сервиса интеграционного журнала",
+                    "type": "string"
+                }
+            },
+            "required": [
+                "journal-service-name"
+            ],
+            "title": "Log"
+        },
+        "EventLog": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "journal-service-name": {
+                    "description": "Название сервиса интеграционного журнала",
+                    "type": "string"
+                },
+                "message": {
+                    "description": "Описание операции для интеграционного журнала",
+                    "type": "string"
+                }
+            },
+            "required": [
+                "journal-service-name"
+            ],
+            "title": "Log"
+        },
+        "Trigger": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "rule": {
+                    "type": "string"
+                }
+            },
+            "required": [
+                "rule"
+            ],
+            "title": "Trigger"
+        }
+    }
+}
