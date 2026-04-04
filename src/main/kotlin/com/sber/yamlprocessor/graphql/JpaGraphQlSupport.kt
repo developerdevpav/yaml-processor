@@ -1,6 +1,7 @@
 package com.sber.yamlprocessor.graphql
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.sber.yamlprocessor.model.Stage
 import graphql.schema.idl.RuntimeWiring
 import jakarta.persistence.ElementCollection
 import jakarta.persistence.Embeddable
@@ -66,7 +67,7 @@ class JpaGraphQlSchemaFactory(
                     "  update${entity.name}(id: ID!, input: ${entity.inputName}!): ${entity.name}!",
                     "  delete${entity.name}(id: ID!): Boolean!"
                 )
-            }
+            } + listOf("  updateStageNode(id: ID!, input: StageInput!): Stage!")
 
         val types = registry.entities.values.joinToString("\n\n") { renderComplexType(it) }
         val embeddables = registry.embeddables.values.joinToString("\n\n") { renderComplexType(it) }
@@ -173,6 +174,10 @@ class JpaGraphQlRuntimeWiringConfigurer(
                     service.delete(entity, env.getArgument("id"))
                 }
             }
+            type.dataFetcher("updateStageNode") { env ->
+                @Suppress("UNCHECKED_CAST")
+                service.updateStageNode(env.getArgument("id"), env.getArgument<Map<String, Any?>>("input"))
+            }
             type
         }
     }
@@ -219,6 +224,25 @@ class JpaGraphQlCrudService(
         entityManager.flush()
         initializeGraph(merged, entity)
         return merged
+    }
+
+    @Transactional
+    fun updateStageNode(id: Any?, input: Map<String, Any?>): Stage {
+        val entity = registry.entity(Stage::class.java)
+        val entityId = convertId(id, entity.idJavaType)
+        val current = entityManager.find(Stage::class.java, entityId)
+            ?: error("Stage with id=$entityId not found")
+        val incoming = objectMapper.convertValue(input, Stage::class.java)
+
+        setFieldValue(incoming, entity.idField.name, entityId)
+        incoming.subprocess = current.subprocess
+        alignChildIdentifiers(current, incoming, entity)
+        sanitize(incoming, entity)
+
+        val merged = entityManager.merge(incoming)
+        entityManager.flush()
+        initializeGraph(merged, entity)
+        return merged as Stage
     }
 
     @Transactional

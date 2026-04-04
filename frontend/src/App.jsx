@@ -190,6 +190,14 @@ const UPDATE_PROCESS = gql`
   }
 `;
 
+const UPDATE_STAGE_NODE = gql`
+  mutation UpdateStageNode($id: ID!, $input: StageInput!) {
+    updateStageNode(id: $id, input: $input) {
+      dbId
+    }
+  }
+`;
+
 const EMPTY_PROCESS_FORM = {
   code: '',
   description: '',
@@ -278,6 +286,11 @@ function createDefaultSubprocess(index) {
 
 function refInput(value) {
   return value?.code ? { code: value.code } : null;
+}
+
+function normalizeReferenceDraft(value) {
+  const code = value?.code?.trim();
+  return code ? { code } : null;
 }
 
 function serializeConfigurator(configurator) {
@@ -393,6 +406,96 @@ function serializeProcessConfig(processConfig) {
   };
 }
 
+const TOPOLOGY_NODE_WIDTH = 220;
+const TOPOLOGY_VERTICAL_GAP = 56;
+const TOPOLOGY_HORIZONTAL_GAP = 72;
+const TOPOLOGY_TOP_PADDING = 32;
+const TOPOLOGY_LEFT_PADDING = 48;
+const TOPOLOGY_TITLE_CHARS_PER_LINE = 20;
+const TOPOLOGY_SUBTITLE_CHARS_PER_LINE = 28;
+
+function estimateTextLines(value, charsPerLine, maxLines) {
+  const text = String(value ?? '').trim();
+
+  if (!text) {
+    return 1;
+  }
+
+  return Math.max(
+    1,
+    Math.min(
+      maxLines,
+      text.split(/\r?\n/).reduce((total, line) => {
+        return total + Math.max(1, Math.ceil(line.length / charsPerLine));
+      }, 0),
+    ),
+  );
+}
+
+function estimateNodeHeight({ title, subtitle, isExpandable }) {
+  const titleLines = estimateTextLines(title, TOPOLOGY_TITLE_CHARS_PER_LINE, 2);
+  const subtitleLines = estimateTextLines(subtitle, TOPOLOGY_SUBTITLE_CHARS_PER_LINE, 3);
+  const hintHeight = isExpandable ? 20 : 0;
+  const estimatedHeight = 62 + titleLines * 20 + subtitleLines * 16 + hintHeight;
+
+  return Math.max(104, estimatedHeight);
+}
+
+function getSubprocessTopologyLayout(subprocess, expandedSet) {
+  const subprocessNodeId = `subprocess:${subprocess.dbId}`;
+  const subprocessExpanded = expandedSet.has(subprocessNodeId);
+  const subprocessHeight = estimateNodeHeight({
+    title: subprocess.id || 'subprocess',
+    subtitle: subprocess.description || 'Подпроцесс',
+    isExpandable: (subprocess.stages?.length ?? 0) > 0,
+  });
+  const stageLayouts = (subprocess.stages ?? []).map((stage) => {
+    const stageExpanded = expandedSet.has(`stage:${stage.dbId}`);
+    const stageHeight = estimateNodeHeight({
+      title: stage.executor || 'stage',
+      subtitle: stage.description || 'Stage',
+      isExpandable: true,
+    });
+    const configuratorHeight = stageExpanded
+      ? estimateNodeHeight({
+          title: 'configurator',
+          subtitle: stage.configurator?.filterEventRule || 'Configurator settings',
+          isExpandable: false,
+        })
+      : 0;
+
+    return {
+      stage,
+      stageExpanded,
+      stageHeight,
+      configuratorHeight,
+      totalHeight: stageHeight + (stageExpanded ? TOPOLOGY_VERTICAL_GAP + configuratorHeight : 0),
+    };
+  });
+  const hasConfiguratorColumn = stageLayouts.some((stageLayout) => stageLayout.stageExpanded);
+  let totalHeight = subprocessHeight;
+
+  if (subprocessExpanded && stageLayouts.length > 0) {
+    totalHeight += TOPOLOGY_VERTICAL_GAP;
+    stageLayouts.forEach((stageLayout, index) => {
+      totalHeight += stageLayout.totalHeight;
+      if (index < stageLayouts.length - 1) {
+        totalHeight += TOPOLOGY_VERTICAL_GAP;
+      }
+    });
+  }
+
+  return {
+    subprocess,
+    subprocessExpanded,
+    subprocessHeight,
+    stageLayouts,
+    width: TOPOLOGY_NODE_WIDTH + (hasConfiguratorColumn ? TOPOLOGY_HORIZONTAL_GAP + TOPOLOGY_NODE_WIDTH : 0),
+    height: totalHeight,
+    hasConfiguratorColumn,
+  };
+}
+
 function buildTopologyModel(processConfig, expandedNodeIds = []) {
   const nodes = [];
   const edges = [];
@@ -402,23 +505,23 @@ function buildTopologyModel(processConfig, expandedNodeIds = []) {
     return { nodes, edges };
   }
 
-  const nodeWidth = 220;
-  const nodeHeight = 92;
-  const columnGap = 56;
-  const rowGap = 136;
-  const processY = 32;
-  const subprocessY = processY + rowGap;
-  const subprocessLayouts = (processConfig.process.subprocess ?? []).map((subprocess) => {
-    return {
-      subprocess,
-      laneWidth: nodeWidth * 2 + columnGap,
-    };
-  });
   const processNodeId = `process:${processConfig.process.dbId}`;
-  const totalWidth =
-    subprocessLayouts.reduce((sum, item) => sum + item.laneWidth, 0) +
-    Math.max(subprocessLayouts.length - 1, 0) * columnGap;
-  const processX = Math.max((totalWidth - nodeWidth) / 2, 32);
+  const processExpanded = expandedSet.has(processNodeId);
+  const subprocessLayouts = processExpanded
+    ? (processConfig.process.subprocess ?? []).map((subprocess) => getSubprocessTopologyLayout(subprocess, expandedSet))
+    : [];
+  const processHeight = estimateNodeHeight({
+    title: processConfig.process.id || 'process',
+    subtitle: processConfig.process.description || 'Корневой процесс',
+    isExpandable: (processConfig.process.subprocess?.length ?? 0) > 0,
+  });
+  const visibleChildrenWidth =
+    subprocessLayouts.reduce((sum, item) => sum + item.width, 0) +
+    Math.max(subprocessLayouts.length - 1, 0) * TOPOLOGY_HORIZONTAL_GAP;
+  const contentWidth = Math.max(TOPOLOGY_NODE_WIDTH, visibleChildrenWidth);
+  const contentStartX = TOPOLOGY_LEFT_PADDING;
+  const processX = contentStartX + (contentWidth - TOPOLOGY_NODE_WIDTH) / 2;
+  const processY = TOPOLOGY_TOP_PADDING;
 
   nodes.push({
     id: processNodeId,
@@ -435,15 +538,16 @@ function buildTopologyModel(processConfig, expandedNodeIds = []) {
     },
   });
 
-  let currentLaneX = 32;
-  subprocessLayouts.forEach(({ subprocess, laneWidth }) => {
-    const subprocessNodeId = `subprocess:${subprocess.dbId}`;
-    const subprocessX = currentLaneX + (laneWidth - nodeWidth) / 2;
-    const processExpanded = expandedSet.has(processNodeId);
+  if (!processExpanded) {
+    return { nodes, edges };
+  }
 
-    if (!processExpanded) {
-      return;
-    }
+  const subprocessY = processY + processHeight + TOPOLOGY_VERTICAL_GAP;
+  let currentLaneX = contentStartX + (contentWidth - visibleChildrenWidth) / 2;
+
+  subprocessLayouts.forEach(({ subprocess, width, subprocessExpanded, subprocessHeight, stageLayouts, hasConfiguratorColumn }) => {
+    const subprocessNodeId = `subprocess:${subprocess.dbId}`;
+    const subprocessX = currentLaneX + (hasConfiguratorColumn ? 0 : (width - TOPOLOGY_NODE_WIDTH) / 2);
 
     nodes.push({
       id: subprocessNodeId,
@@ -468,19 +572,18 @@ function buildTopologyModel(processConfig, expandedNodeIds = []) {
       },
     });
 
-    if (!expandedSet.has(subprocessNodeId)) {
-      currentLaneX += laneWidth + columnGap;
+    if (!subprocessExpanded) {
+      currentLaneX += width + TOPOLOGY_HORIZONTAL_GAP;
       return;
     }
 
-    let currentStageY = subprocessY + rowGap;
-    (subprocess.stages ?? []).forEach((stage) => {
+    let currentStageY = subprocessY + subprocessHeight + TOPOLOGY_VERTICAL_GAP;
+    stageLayouts.forEach(({ stage, stageExpanded, stageHeight, configuratorHeight }, index) => {
       const stageNodeId = `stage:${stage.dbId}`;
-      const stageExpanded = expandedSet.has(stageNodeId);
       nodes.push({
         id: stageNodeId,
         type: 'processNode',
-        position: { x: subprocessX, y: currentStageY },
+        position: { x: currentLaneX, y: currentStageY },
         sourcePosition: Position.Bottom,
         targetPosition: Position.Top,
         data: {
@@ -505,7 +608,10 @@ function buildTopologyModel(processConfig, expandedNodeIds = []) {
         nodes.push({
           id: configuratorNodeId,
           type: 'processNode',
-          position: { x: subprocessX + nodeWidth + columnGap, y: currentStageY + rowGap },
+          position: {
+            x: currentLaneX + TOPOLOGY_NODE_WIDTH + TOPOLOGY_HORIZONTAL_GAP,
+            y: currentStageY + stageHeight + TOPOLOGY_VERTICAL_GAP,
+          },
           sourcePosition: Position.Left,
           targetPosition: Position.Left,
           data: {
@@ -525,14 +631,17 @@ function buildTopologyModel(processConfig, expandedNodeIds = []) {
             type: MarkerType.ArrowClosed,
           },
         });
-        currentStageY += rowGap * 2;
-        return;
+        currentStageY += stageHeight + TOPOLOGY_VERTICAL_GAP + configuratorHeight;
+      } else {
+        currentStageY += stageHeight;
       }
 
-      currentStageY += rowGap;
+      if (index < stageLayouts.length - 1) {
+        currentStageY += TOPOLOGY_VERTICAL_GAP;
+      }
     });
 
-    currentLaneX += laneWidth + columnGap;
+    currentLaneX += width + TOPOLOGY_HORIZONTAL_GAP;
   });
 
   return { nodes, edges };
@@ -772,7 +881,7 @@ function NodeEditor({
         id: draft.id ?? '',
         description: draft.description ?? '',
         disabled: draft.disabled ?? false,
-        contextCode: draft.contextCode ?? null,
+        contextCode: normalizeReferenceDraft(draft.contextCode),
       });
       return;
     }
@@ -782,7 +891,7 @@ function NodeEditor({
         id: draft.id ?? '',
         description: draft.description ?? '',
         disabled: draft.disabled ?? false,
-        contextCode: draft.contextCode ?? null,
+        contextCode: normalizeReferenceDraft(draft.contextCode),
         trigger: draft.trigger ?? { rule: '' },
       });
       return;
@@ -793,8 +902,9 @@ function NodeEditor({
         id: draft.id ?? false,
         executor: draft.executor ?? '',
         description: draft.description ?? '',
-        contextCode: draft.contextCode ?? null,
+        contextCode: normalizeReferenceDraft(draft.contextCode),
         log: draft.log ?? { journalServiceName: '' },
+        configurator: draft.configurator ?? null,
       });
       return;
     }
@@ -1744,6 +1854,9 @@ export function App() {
   const [updateProcess, updateState] = useMutation(UPDATE_PROCESS, {
     fetchPolicy: 'no-cache',
   });
+  const [updateStageNode, updateStageState] = useMutation(UPDATE_STAGE_NODE, {
+    fetchPolicy: 'no-cache',
+  });
   const [form, setForm] = useState(EMPTY_PROCESS_FORM);
   const [selectedConfigId, setSelectedConfigId] = useState(null);
   const [selectedNodeId, setSelectedNodeId] = useState(null);
@@ -1848,6 +1961,33 @@ export function App() {
     }
   };
 
+  const saveStageNode = async (nextConfig) => {
+    if (!selectedNodeId?.startsWith('stage:')) {
+      return;
+    }
+
+    const stageId = selectedNodeId.split(':')[1];
+    const selectedStage = findSelectedNode(nextConfig, selectedNodeId)?.node;
+    if (!selectedStage) {
+      return;
+    }
+
+    try {
+      setUpdateErrorMessage('');
+      setLocalProcessConfig(nextConfig);
+      await updateStageNode({
+        variables: {
+          id: stageId,
+          input: serializeStage(selectedStage),
+        },
+      });
+      refetch();
+    } catch (mutationError) {
+      setLocalProcessConfig(serverActiveProcessConfig);
+      setUpdateErrorMessage(getErrorMessage(mutationError, 'Не удалось сохранить изменения stage.'));
+    }
+  };
+
   const handleCreateProcess = async (event) => {
     event.preventDefault();
     setCreateErrorMessage('');
@@ -1891,6 +2031,10 @@ export function App() {
     }
 
     const nextConfig = updateSelectedNode(activeProcessConfig, selectedNodeId, values);
+    if (selectedNodeId.startsWith('stage:')) {
+      await saveStageNode(nextConfig);
+      return;
+    }
     await saveProcessConfig(nextConfig);
   };
 
@@ -2168,7 +2312,7 @@ export function App() {
             onAddStage={handleAddStage}
             onReorderStages={handleReorderStages}
             contextCodeOptions={processCodeOptions}
-            isSaving={updateState.loading}
+            isSaving={updateState.loading || updateStageState.loading}
           />
           {updateErrorMessage && (
             <Alert isInline variant="danger" title={updateErrorMessage} className="form-alert" />

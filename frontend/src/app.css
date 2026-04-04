@@ -14,6 +14,7 @@ body {
   margin: 0;
   min-height: 100vh;
   background: transparent;
+  overflow-x: hidden;
 }
 
 #root {
@@ -220,6 +221,7 @@ body {
   line-height: 1.25;
   overflow: hidden;
   text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 
 .process-node__hint {
@@ -282,6 +284,7 @@ body {
 
 .process-chip small {
   color: #486075;
+  overflow-wrap: anywhere;
 }
 
 .editor-actions {
@@ -406,10 +409,17 @@ body {
 
 .editor-drawer-backdrop {
   position: fixed;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
   background: rgba(8, 22, 33, 0.28);
   opacity: 0;
   pointer-events: none;
+  overflow: hidden;
   transition: opacity 180ms ease;
   z-index: 200;
 }
@@ -453,6 +463,7 @@ body {
 .editor-drawer__body {
   overflow: auto;
   min-height: 0;
+  overflow-wrap: anywhere;
 }
 
 .editor-drawer__body .editor-card {

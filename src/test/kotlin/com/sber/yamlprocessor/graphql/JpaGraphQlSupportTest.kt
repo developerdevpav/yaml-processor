@@ -20,5 +20,6 @@ class JpaGraphQlSupportTest {
         assertNotNull(schema.queryType.getFieldDefinition("process"))
         assertNotNull(schema.queryType.getFieldDefinition("processList"))
         assertTrue(schema.mutationType.fieldDefinitions.any { it.name == "createProcess" })
+        assertTrue(schema.mutationType.fieldDefinitions.any { it.name == "updateStageNode" })
     }
 }
