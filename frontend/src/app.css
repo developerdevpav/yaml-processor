@@ -43,8 +43,7 @@ body {
   align-items: stretch;
 }
 
-.sidebar-column,
-.editor-column {
+.sidebar-column {
   width: 21rem;
 }
 
@@ -291,13 +290,81 @@ body {
   margin-top: 1rem;
 }
 
+.editor-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 22, 33, 0.28);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms ease;
+  z-index: 200;
+}
+
+.editor-drawer-backdrop-open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.editor-drawer {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  bottom: 1rem;
+  width: min(28rem, calc(100vw - 2rem));
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid rgba(19, 38, 58, 0.1);
+  border-radius: 1.5rem;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 24px 70px rgba(10, 37, 64, 0.22);
+  backdrop-filter: blur(18px);
+  transform: translateX(calc(100% + 1rem));
+  transition: transform 220ms ease;
+  z-index: 210;
+}
+
+.editor-drawer-open {
+  transform: translateX(0);
+}
+
+.editor-drawer__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.editor-drawer__body {
+  overflow: auto;
+  min-height: 0;
+}
+
+.editor-drawer__body .editor-card {
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+  backdrop-filter: none;
+}
+
+.editor-drawer__body .pf-v5-c-card__title,
+.editor-drawer__body .pf-v5-c-card__body {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.editor-drawer__close-icon {
+  width: 1rem;
+  height: 1rem;
+}
+
 @media (max-width: 1280px) {
   .workspace-layout {
     flex-direction: column;
   }
 
   .sidebar-column,
-  .editor-column,
   .canvas-column {
     width: 100%;
   }
@@ -313,5 +380,21 @@ body {
   .canvas-card-header {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .editor-drawer {
+    top: auto;
+    right: 0;
+    left: 0;
+    bottom: 0;
+    width: 100vw;
+    max-width: none;
+    height: min(85vh, 48rem);
+    border-radius: 1.5rem 1.5rem 0 0;
+    transform: translateY(100%);
+  }
+
+  .editor-drawer-open {
+    transform: translateY(0);
   }
 }

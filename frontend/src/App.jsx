@@ -627,12 +627,7 @@ function NodeEditor({ processConfig, selectedNodeId, onSave, onAddSubprocess, on
   }, [selectedNodeId, processConfig]);
 
   if (!selected) {
-    return (
-      <Card className="editor-card">
-        <CardTitle>Свойства узла</CardTitle>
-        <CardBody>Выберите узел на графе, чтобы редактировать процесс, subprocess или stage.</CardBody>
-      </Card>
-    );
+    return null;
   }
 
   const save = () => onSave(draft);
@@ -725,6 +720,7 @@ export function App() {
   const [createErrorMessage, setCreateErrorMessage] = useState('');
   const [updateErrorMessage, setUpdateErrorMessage] = useState('');
   const [isTopologyFullscreen, setIsTopologyFullscreen] = useState(false);
+  const [isEditorOpen, setIsEditorOpen] = useState(false);
   const topologyContainerRef = useRef(null);
 
   const processConfigs = data?.processConfigList ?? [];
@@ -779,6 +775,10 @@ export function App() {
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
     };
   }, []);
+
+  useEffect(() => {
+    setIsEditorOpen(Boolean(findSelectedNode(activeProcessConfig, selectedNodeId)));
+  }, [activeProcessConfig, selectedNodeId]);
 
   const saveProcessConfig = async (nextConfig) => {
     try {
@@ -902,6 +902,12 @@ export function App() {
 
   const handleEditNode = (nodeId) => {
     setSelectedNodeId(nodeId);
+    setIsEditorOpen(true);
+  };
+
+  const handleCloseEditor = () => {
+    setIsEditorOpen(false);
+    setSelectedNodeId(null);
   };
 
   const handleToggleTopologyFullscreen = async () => {
@@ -1045,22 +1051,40 @@ export function App() {
               </Card>
             </div>
           </SplitItem>
-
-          <SplitItem isFilled={false} className="editor-column">
-            <NodeEditor
-              processConfig={activeProcessConfig}
-              selectedNodeId={selectedNodeId}
-              onSave={handleSaveNode}
-              onAddSubprocess={handleAddSubprocess}
-              onAddStage={handleAddStage}
-              isSaving={updateState.loading}
-            />
-            {updateErrorMessage && (
-              <Alert isInline variant="danger" title={updateErrorMessage} className="form-alert" />
-            )}
-          </SplitItem>
         </Split>
       </PageSection>
+
+      <div
+        className={isEditorOpen ? 'editor-drawer-backdrop editor-drawer-backdrop-open' : 'editor-drawer-backdrop'}
+        onClick={handleCloseEditor}
+        aria-hidden={!isEditorOpen}
+      />
+      <aside className={isEditorOpen ? 'editor-drawer editor-drawer-open' : 'editor-drawer'} aria-hidden={!isEditorOpen}>
+        <div className="editor-drawer__header">
+          <Title headingLevel="h3">Свойства узла</Title>
+          <Button variant="plain" onClick={handleCloseEditor} aria-label="Закрыть панель свойств">
+            <svg viewBox="0 0 24 24" aria-hidden="true" className="editor-drawer__close-icon">
+              <path
+                d="M18.3 5.71 12 12l6.3 6.29-1.41 1.41L10.59 13.41 4.29 19.7 2.88 18.29 9.17 12 2.88 5.71 4.29 4.3l6.3 6.29 6.29-6.3z"
+                fill="currentColor"
+              />
+            </svg>
+          </Button>
+        </div>
+        <div className="editor-drawer__body" onClick={(event) => event.stopPropagation()}>
+          <NodeEditor
+            processConfig={activeProcessConfig}
+            selectedNodeId={selectedNodeId}
+            onSave={handleSaveNode}
+            onAddSubprocess={handleAddSubprocess}
+            onAddStage={handleAddStage}
+            isSaving={updateState.loading}
+          />
+          {updateErrorMessage && (
+            <Alert isInline variant="danger" title={updateErrorMessage} className="form-alert" />
+          )}
+        </div>
+      </aside>
     </Page>
   );
 }
