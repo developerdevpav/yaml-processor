@@ -5,6 +5,7 @@ import {
   Card,
   CardBody,
   CardTitle,
+  Checkbox,
   EmptyState,
   EmptyStateBody,
   EmptyStateFooter,
@@ -217,6 +218,24 @@ function reorderItems(items, fromIndex, toIndex) {
   return next;
 }
 
+function updateNestedValue(source, path, value) {
+  if (path.length === 0) {
+    return value;
+  }
+
+  const [key, ...rest] = path;
+  const currentValue = source ?? {};
+
+  return {
+    ...currentValue,
+    [key]: updateNestedValue(currentValue[key], rest, value),
+  };
+}
+
+function updateItemAt(items, index, updater) {
+  return items.map((item, itemIndex) => (itemIndex === index ? updater(item) : item));
+}
+
 function createDefaultStage(index) {
   return {
     id: false,
@@ -392,7 +411,7 @@ function buildTopologyModel(processConfig, expandedNodeIds = []) {
   const subprocessLayouts = (processConfig.process.subprocess ?? []).map((subprocess) => {
     return {
       subprocess,
-      laneWidth: nodeWidth,
+      laneWidth: nodeWidth * 2 + columnGap,
     };
   });
   const processNodeId = `process:${processConfig.process.dbId}`;
@@ -454,21 +473,22 @@ function buildTopologyModel(processConfig, expandedNodeIds = []) {
       return;
     }
 
-    (subprocess.stages ?? []).forEach((stage, stageIndex) => {
+    let currentStageY = subprocessY + rowGap;
+    (subprocess.stages ?? []).forEach((stage) => {
       const stageNodeId = `stage:${stage.dbId}`;
-      const stageY = subprocessY + rowGap * (stageIndex + 1);
+      const stageExpanded = expandedSet.has(stageNodeId);
       nodes.push({
         id: stageNodeId,
         type: 'processNode',
-        position: { x: subprocessX, y: stageY },
+        position: { x: subprocessX, y: currentStageY },
         sourcePosition: Position.Bottom,
         targetPosition: Position.Top,
         data: {
           title: stage.executor || 'stage',
           kind: 'stage',
           secondaryLabel: stage.description || 'Stage',
-          isExpandable: false,
-          isExpanded: false,
+          isExpandable: true,
+          isExpanded: stageExpanded,
         },
       });
       edges.push({
@@ -479,6 +499,37 @@ function buildTopologyModel(processConfig, expandedNodeIds = []) {
           type: MarkerType.ArrowClosed,
         },
       });
+
+      if (stageExpanded) {
+        const configuratorNodeId = `configurator:${stage.dbId}`;
+        nodes.push({
+          id: configuratorNodeId,
+          type: 'processNode',
+          position: { x: subprocessX + nodeWidth + columnGap, y: currentStageY + rowGap },
+          sourcePosition: Position.Left,
+          targetPosition: Position.Left,
+          data: {
+            title: 'configurator',
+            kind: 'configurator',
+            secondaryLabel: stage.configurator?.filterEventRule || 'Configurator settings',
+            isExpandable: false,
+            isExpanded: false,
+          },
+        });
+        edges.push({
+          id: `${stageNodeId}->${configuratorNodeId}`,
+          source: stageNodeId,
+          target: configuratorNodeId,
+          sourceHandle: null,
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+          },
+        });
+        currentStageY += rowGap * 2;
+        return;
+      }
+
+      currentStageY += rowGap;
     });
 
     currentLaneX += laneWidth + columnGap;
@@ -532,6 +583,21 @@ function updateSelectedNode(processConfig, selectedNodeId, values) {
     };
   }
 
+  if (kind === 'configurator') {
+    return {
+      ...processConfig,
+      process: {
+        ...processConfig.process,
+        subprocess: (processConfig.process.subprocess ?? []).map((subprocess) => ({
+          ...subprocess,
+          stages: (subprocess.stages ?? []).map((stage) =>
+            String(stage.dbId) === targetId ? { ...stage, configurator: values } : stage,
+          ),
+        })),
+      },
+    };
+  }
+
   return processConfig;
 }
 
@@ -557,6 +623,15 @@ function findSelectedNode(processConfig, selectedNodeId) {
       const stage = (subprocess.stages ?? []).find((item) => String(item.dbId) === targetId);
       if (stage) {
         return { kind, node: stage, parent: subprocess };
+      }
+    }
+  }
+
+  if (kind === 'configurator') {
+    for (const subprocess of processConfig.process.subprocess ?? []) {
+      const stage = (subprocess.stages ?? []).find((item) => String(item.dbId) === targetId);
+      if (stage) {
+        return { kind, node: stage.configurator ?? {}, parent: stage, subprocess };
       }
     }
   }
@@ -650,7 +725,16 @@ function ProcessTopology({ processConfig, selectedNodeId, expandedNodeIds, onTog
   );
 }
 
-function NodeEditor({ processConfig, selectedNodeId, onSave, onAddSubprocess, onAddStage, onReorderStages, isSaving }) {
+function NodeEditor({
+  processConfig,
+  selectedNodeId,
+  onSave,
+  onAddSubprocess,
+  onAddStage,
+  onReorderStages,
+  contextCodeOptions,
+  isSaving,
+}) {
   const selected = findSelectedNode(processConfig, selectedNodeId);
   const [draft, setDraft] = useState({});
   const [stageOrder, setStageOrder] = useState([]);
@@ -682,7 +766,41 @@ function NodeEditor({ processConfig, selectedNodeId, onSave, onAddSubprocess, on
     return null;
   }
 
-  const save = () => onSave(draft);
+  const save = () => {
+    if (selected.kind === 'process') {
+      onSave({
+        id: draft.id ?? '',
+        description: draft.description ?? '',
+        disabled: draft.disabled ?? false,
+        contextCode: draft.contextCode ?? null,
+      });
+      return;
+    }
+
+    if (selected.kind === 'subprocess') {
+      onSave({
+        id: draft.id ?? '',
+        description: draft.description ?? '',
+        disabled: draft.disabled ?? false,
+        contextCode: draft.contextCode ?? null,
+        trigger: draft.trigger ?? { rule: '' },
+      });
+      return;
+    }
+
+    if (selected.kind === 'stage') {
+      onSave({
+        id: draft.id ?? false,
+        executor: draft.executor ?? '',
+        description: draft.description ?? '',
+        contextCode: draft.contextCode ?? null,
+        log: draft.log ?? { journalServiceName: '' },
+      });
+      return;
+    }
+
+    onSave(draft);
+  };
   const orderedStages =
     selected.kind === 'subprocess'
       ? stageOrder
@@ -726,39 +844,726 @@ function NodeEditor({ processConfig, selectedNodeId, onSave, onAddSubprocess, on
     await onReorderStages(String(selected.node.dbId), nextStageOrder);
   };
 
+  const updateDraftPath = (path, value) => {
+    setDraft((current) => updateNestedValue(current, path, value));
+  };
+
+  const updateDraftArrayItem = (path, index, updater) => {
+    setDraft((current) => {
+      const targetArray = path.reduce((acc, key) => acc?.[key], current) ?? [];
+      return updateNestedValue(current, path, updateItemAt(targetArray, index, updater));
+    });
+  };
+
+  const addDraftArrayItem = (path, item) => {
+    setDraft((current) => {
+      const targetArray = path.reduce((acc, key) => acc?.[key], current) ?? [];
+      return updateNestedValue(current, path, [...targetArray, item]);
+    });
+  };
+
+  const removeDraftArrayItem = (path, index) => {
+    setDraft((current) => {
+      const targetArray = path.reduce((acc, key) => acc?.[key], current) ?? [];
+      return updateNestedValue(
+        current,
+        path,
+        targetArray.filter((_, itemIndex) => itemIndex !== index),
+      );
+    });
+  };
+
+  const createDefaultResult = () => ({
+    inputScenarios: [],
+    reverse: [],
+  });
+
+  const createDefaultReverse = () => ({
+    status: { code: '' },
+    output: [],
+  });
+
+  const createDefaultOutput = () => ({
+    phase: { code: '' },
+    name: '',
+    rule: '',
+    body: {
+      type: '',
+      eventObject: {
+        type: '',
+      },
+      service: {
+        scenario: '',
+        status: '',
+        sla: {
+          durationValue: '',
+          durationUnit: { code: '' },
+          status: { code: '' },
+        },
+      },
+    },
+    log: {
+      journalServiceName: '',
+      message: '',
+    },
+  });
+
   return (
     <Card className="editor-card">
       <CardTitle>Свойства: {selected.kind}</CardTitle>
       <CardBody>
         <Form>
           {(selected.kind === 'process' || selected.kind === 'subprocess') && (
-            <FormGroup label="Код" fieldId="node-code">
-              <TextInput
-                id="node-code"
-                value={draft.id ?? ''}
-                onChange={(_, value) => setDraft((current) => ({ ...current, id: value }))}
-              />
-            </FormGroup>
+            <>
+              <FormGroup label="Код" fieldId="node-code">
+                <TextInput
+                  id="node-code"
+                  value={draft.id ?? ''}
+                  onChange={(_, value) => setDraft((current) => ({ ...current, id: value }))}
+                />
+              </FormGroup>
+              <FormGroup label="Context code" fieldId="node-context-code">
+                <select
+                  id="node-context-code"
+                  className="process-select"
+                  value={draft.contextCode?.code ?? ''}
+                  onChange={(event) => updateDraftPath(['contextCode', 'code'], event.target.value)}
+                >
+                  <option value="">Выберите context code</option>
+                  {contextCodeOptions.map((code) => (
+                    <option key={code} value={code}>
+                      {code}
+                    </option>
+                  ))}
+                </select>
+              </FormGroup>
+            </>
           )}
 
           {selected.kind === 'stage' && (
-            <FormGroup label="Executor" fieldId="stage-executor">
-              <TextInput
-                id="stage-executor"
-                value={draft.executor ?? ''}
-                onChange={(_, value) => setDraft((current) => ({ ...current, executor: value }))}
+            <>
+              <FormGroup label="Stage enabled flag" fieldId="stage-id-flag">
+                <Checkbox
+                  id="stage-id-flag"
+                  isChecked={Boolean(draft.id)}
+                  onChange={(_, checked) => setDraft((current) => ({ ...current, id: checked }))}
+                  label="id"
+                />
+              </FormGroup>
+              <FormGroup label="Executor" fieldId="stage-executor">
+                <TextInput
+                  id="stage-executor"
+                  value={draft.executor ?? ''}
+                  onChange={(_, value) => setDraft((current) => ({ ...current, executor: value }))}
+                />
+              </FormGroup>
+              <FormGroup label="Context code" fieldId="stage-context-code">
+                <select
+                  id="stage-context-code"
+                  className="process-select"
+                  value={draft.contextCode?.code ?? ''}
+                  onChange={(event) => updateDraftPath(['contextCode', 'code'], event.target.value)}
+                >
+                  <option value="">Выберите context code</option>
+                  {contextCodeOptions.map((code) => (
+                    <option key={code} value={code}>
+                      {code}
+                    </option>
+                  ))}
+                </select>
+              </FormGroup>
+              <div className="stage-editor-section">
+                <Title headingLevel="h4">Stage log</Title>
+                <FormGroup label="Journal service name" fieldId="stage-log-journal">
+                  <TextInput
+                    id="stage-log-journal"
+                    value={draft.log?.journalServiceName ?? ''}
+                    onChange={(_, value) => updateDraftPath(['log', 'journalServiceName'], value)}
+                  />
+                </FormGroup>
+              </div>
+              <div className="stage-editor-section">
+                <Title headingLevel="h4">Configurator</Title>
+                <div className="stage-editor-grid">
+                  <Checkbox
+                    id="stage-configurator-disabled"
+                    isChecked={Boolean(draft.configurator?.disabled)}
+                    onChange={(_, checked) => updateDraftPath(['configurator', 'disabled'], checked)}
+                    label="Disabled"
+                  />
+                  <Checkbox
+                    id="stage-configurator-interrupted"
+                    isChecked={Boolean(draft.configurator?.interrupted)}
+                    onChange={(_, checked) => updateDraftPath(['configurator', 'interrupted'], checked)}
+                    label="Interrupted"
+                  />
+                  <Checkbox
+                    id="stage-configurator-multiple"
+                    isChecked={Boolean(draft.configurator?.multiple)}
+                    onChange={(_, checked) => updateDraftPath(['configurator', 'multiple'], checked)}
+                    label="Multiple"
+                  />
+                </div>
+                <FormGroup label="Filter event rule" fieldId="stage-filter-event-rule">
+                  <TextInput
+                    id="stage-filter-event-rule"
+                    value={draft.configurator?.filterEventRule ?? ''}
+                    onChange={(_, value) => updateDraftPath(['configurator', 'filterEventRule'], value)}
+                  />
+                </FormGroup>
+                <div className="stage-editor-subsection">
+                  <Title headingLevel="h5">Audit</Title>
+                  <div className="stage-editor-grid">
+                    <Checkbox
+                      id="stage-audit-enabled"
+                      isChecked={Boolean(draft.configurator?.audit?.enabled)}
+                      onChange={(_, checked) => updateDraftPath(['configurator', 'audit', 'enabled'], checked)}
+                      label="Enabled"
+                    />
+                  </div>
+                  <FormGroup label="Event code" fieldId="stage-audit-event-code">
+                    <TextInput
+                      id="stage-audit-event-code"
+                      value={draft.configurator?.audit?.eventCode ?? ''}
+                      onChange={(_, value) => updateDraftPath(['configurator', 'audit', 'eventCode'], value)}
+                    />
+                  </FormGroup>
+                  <FormGroup label="Event description" fieldId="stage-audit-event-description">
+                    <TextInput
+                      id="stage-audit-event-description"
+                      value={draft.configurator?.audit?.eventDescription ?? ''}
+                      onChange={(_, value) => updateDraftPath(['configurator', 'audit', 'eventDescription'], value)}
+                    />
+                  </FormGroup>
+                </div>
+                <div className="stage-editor-subsection">
+                  <div className="stage-editor-inline-header">
+                    <Title headingLevel="h5">Results</Title>
+                    <Button variant="secondary" onClick={() => addDraftArrayItem(['configurator', 'result'], createDefaultResult())}>
+                      Добавить result
+                    </Button>
+                  </div>
+                  {(draft.configurator?.result ?? []).map((result, resultIndex) => (
+                    <Card key={result.dbId ?? `result-${resultIndex}`} className="stage-editor-card">
+                      <CardTitle>
+                        <div className="stage-editor-inline-header">
+                          <span>Result {resultIndex + 1}</span>
+                          <Button variant="link" onClick={() => removeDraftArrayItem(['configurator', 'result'], resultIndex)}>
+                            Удалить
+                          </Button>
+                        </div>
+                      </CardTitle>
+                      <CardBody>
+                        <FormGroup label="Input scenarios" fieldId={`result-input-scenarios-${resultIndex}`}>
+                          <TextArea
+                            id={`result-input-scenarios-${resultIndex}`}
+                            value={(result.inputScenarios ?? []).join('\n')}
+                            onChange={(_, value) =>
+                              updateDraftArrayItem(['configurator', 'result'], resultIndex, (currentResult) => ({
+                                ...currentResult,
+                                inputScenarios: value
+                                  .split('\n')
+                                  .map((item) => item.trim())
+                                  .filter(Boolean),
+                              }))
+                            }
+                            resizeOrientation="vertical"
+                          />
+                        </FormGroup>
+                        <div className="stage-editor-subsection">
+                          <div className="stage-editor-inline-header">
+                            <Title headingLevel="h6">Reverse</Title>
+                            <Button
+                              variant="secondary"
+                              onClick={() =>
+                                updateDraftArrayItem(['configurator', 'result'], resultIndex, (currentResult) => ({
+                                  ...currentResult,
+                                  reverse: [...(currentResult.reverse ?? []), createDefaultReverse()],
+                                }))
+                              }
+                            >
+                              Добавить reverse
+                            </Button>
+                          </div>
+                          {(result.reverse ?? []).map((reverse, reverseIndex) => (
+                            <Card key={reverse.dbId ?? `reverse-${resultIndex}-${reverseIndex}`} className="stage-editor-card">
+                              <CardTitle>
+                                <div className="stage-editor-inline-header">
+                                  <span>Reverse {reverseIndex + 1}</span>
+                                  <Button
+                                    variant="link"
+                                    onClick={() =>
+                                      updateDraftArrayItem(['configurator', 'result'], resultIndex, (currentResult) => ({
+                                        ...currentResult,
+                                        reverse: (currentResult.reverse ?? []).filter((_, itemIndex) => itemIndex !== reverseIndex),
+                                      }))
+                                    }
+                                  >
+                                    Удалить
+                                  </Button>
+                                </div>
+                              </CardTitle>
+                              <CardBody>
+                                <FormGroup label="Status code" fieldId={`reverse-status-${resultIndex}-${reverseIndex}`}>
+                                  <TextInput
+                                    id={`reverse-status-${resultIndex}-${reverseIndex}`}
+                                    value={reverse.status?.code ?? ''}
+                                    onChange={(_, value) =>
+                                      updateDraftArrayItem(['configurator', 'result'], resultIndex, (currentResult) => ({
+                                        ...currentResult,
+                                        reverse: updateItemAt(currentResult.reverse ?? [], reverseIndex, (currentReverse) => ({
+                                          ...currentReverse,
+                                          status: {
+                                            ...(currentReverse.status ?? {}),
+                                            code: value,
+                                          },
+                                        })),
+                                      }))
+                                    }
+                                  />
+                                </FormGroup>
+                                <div className="stage-editor-subsection">
+                                  <div className="stage-editor-inline-header">
+                                    <Title headingLevel="h6">Output</Title>
+                                    <Button
+                                      variant="secondary"
+                                      onClick={() =>
+                                        updateDraftArrayItem(['configurator', 'result'], resultIndex, (currentResult) => ({
+                                          ...currentResult,
+                                          reverse: updateItemAt(currentResult.reverse ?? [], reverseIndex, (currentReverse) => ({
+                                            ...currentReverse,
+                                            output: [...(currentReverse.output ?? []), createDefaultOutput()],
+                                          })),
+                                        }))
+                                      }
+                                    >
+                                      Добавить output
+                                    </Button>
+                                  </div>
+                                  {(reverse.output ?? []).map((output, outputIndex) => (
+                                    <Card
+                                      key={output.dbId ?? `output-${resultIndex}-${reverseIndex}-${outputIndex}`}
+                                      className="stage-editor-card"
+                                    >
+                                      <CardTitle>
+                                        <div className="stage-editor-inline-header">
+                                          <span>Output {outputIndex + 1}</span>
+                                          <Button
+                                            variant="link"
+                                            onClick={() =>
+                                              updateDraftArrayItem(['configurator', 'result'], resultIndex, (currentResult) => ({
+                                                ...currentResult,
+                                                reverse: updateItemAt(
+                                                  currentResult.reverse ?? [],
+                                                  reverseIndex,
+                                                  (currentReverse) => ({
+                                                    ...currentReverse,
+                                                    output: (currentReverse.output ?? []).filter(
+                                                      (_, itemIndex) => itemIndex !== outputIndex,
+                                                    ),
+                                                  }),
+                                                ),
+                                              }))
+                                            }
+                                          >
+                                            Удалить
+                                          </Button>
+                                        </div>
+                                      </CardTitle>
+                                      <CardBody>
+                                        <FormGroup label="Phase code" fieldId={`output-phase-${resultIndex}-${reverseIndex}-${outputIndex}`}>
+                                          <TextInput
+                                            id={`output-phase-${resultIndex}-${reverseIndex}-${outputIndex}`}
+                                            value={output.phase?.code ?? ''}
+                                            onChange={(_, value) =>
+                                              updateDraftArrayItem(['configurator', 'result'], resultIndex, (currentResult) => ({
+                                                ...currentResult,
+                                                reverse: updateItemAt(currentResult.reverse ?? [], reverseIndex, (currentReverse) => ({
+                                                  ...currentReverse,
+                                                  output: updateItemAt(currentReverse.output ?? [], outputIndex, (currentOutput) => ({
+                                                    ...currentOutput,
+                                                    phase: {
+                                                      ...(currentOutput.phase ?? {}),
+                                                      code: value,
+                                                    },
+                                                  })),
+                                                })),
+                                              }))
+                                            }
+                                          />
+                                        </FormGroup>
+                                        <FormGroup label="Name" fieldId={`output-name-${resultIndex}-${reverseIndex}-${outputIndex}`}>
+                                          <TextInput
+                                            id={`output-name-${resultIndex}-${reverseIndex}-${outputIndex}`}
+                                            value={output.name ?? ''}
+                                            onChange={(_, value) =>
+                                              updateDraftArrayItem(['configurator', 'result'], resultIndex, (currentResult) => ({
+                                                ...currentResult,
+                                                reverse: updateItemAt(currentResult.reverse ?? [], reverseIndex, (currentReverse) => ({
+                                                  ...currentReverse,
+                                                  output: updateItemAt(currentReverse.output ?? [], outputIndex, (currentOutput) => ({
+                                                    ...currentOutput,
+                                                    name: value,
+                                                  })),
+                                                })),
+                                              }))
+                                            }
+                                          />
+                                        </FormGroup>
+                                        <FormGroup label="Rule" fieldId={`output-rule-${resultIndex}-${reverseIndex}-${outputIndex}`}>
+                                          <TextInput
+                                            id={`output-rule-${resultIndex}-${reverseIndex}-${outputIndex}`}
+                                            value={output.rule ?? ''}
+                                            onChange={(_, value) =>
+                                              updateDraftArrayItem(['configurator', 'result'], resultIndex, (currentResult) => ({
+                                                ...currentResult,
+                                                reverse: updateItemAt(currentResult.reverse ?? [], reverseIndex, (currentReverse) => ({
+                                                  ...currentReverse,
+                                                  output: updateItemAt(currentReverse.output ?? [], outputIndex, (currentOutput) => ({
+                                                    ...currentOutput,
+                                                    rule: value,
+                                                  })),
+                                                })),
+                                              }))
+                                            }
+                                          />
+                                        </FormGroup>
+                                        <div className="stage-editor-subsection">
+                                          <Title headingLevel="h6">Body</Title>
+                                          <FormGroup label="Body type" fieldId={`output-body-type-${resultIndex}-${reverseIndex}-${outputIndex}`}>
+                                            <TextInput
+                                              id={`output-body-type-${resultIndex}-${reverseIndex}-${outputIndex}`}
+                                              value={output.body?.type ?? ''}
+                                              onChange={(_, value) =>
+                                                updateDraftArrayItem(['configurator', 'result'], resultIndex, (currentResult) => ({
+                                                  ...currentResult,
+                                                  reverse: updateItemAt(
+                                                    currentResult.reverse ?? [],
+                                                    reverseIndex,
+                                                    (currentReverse) => ({
+                                                      ...currentReverse,
+                                                      output: updateItemAt(
+                                                        currentReverse.output ?? [],
+                                                        outputIndex,
+                                                        (currentOutput) => ({
+                                                          ...currentOutput,
+                                                          body: {
+                                                            ...(currentOutput.body ?? {}),
+                                                            type: value,
+                                                          },
+                                                        }),
+                                                      ),
+                                                    }),
+                                                  ),
+                                                }))
+                                              }
+                                            />
+                                          </FormGroup>
+                                          <FormGroup
+                                            label="Event object type"
+                                            fieldId={`output-event-object-type-${resultIndex}-${reverseIndex}-${outputIndex}`}
+                                          >
+                                            <TextInput
+                                              id={`output-event-object-type-${resultIndex}-${reverseIndex}-${outputIndex}`}
+                                              value={output.body?.eventObject?.type ?? ''}
+                                              onChange={(_, value) =>
+                                                updateDraftArrayItem(['configurator', 'result'], resultIndex, (currentResult) => ({
+                                                  ...currentResult,
+                                                  reverse: updateItemAt(
+                                                    currentResult.reverse ?? [],
+                                                    reverseIndex,
+                                                    (currentReverse) => ({
+                                                      ...currentReverse,
+                                                      output: updateItemAt(
+                                                        currentReverse.output ?? [],
+                                                        outputIndex,
+                                                        (currentOutput) => ({
+                                                          ...currentOutput,
+                                                          body: {
+                                                            ...(currentOutput.body ?? {}),
+                                                            eventObject: {
+                                                              ...(currentOutput.body?.eventObject ?? {}),
+                                                              type: value,
+                                                            },
+                                                          },
+                                                        }),
+                                                      ),
+                                                    }),
+                                                  ),
+                                                }))
+                                              }
+                                            />
+                                          </FormGroup>
+                                          <FormGroup label="Service scenario" fieldId={`output-service-scenario-${resultIndex}-${reverseIndex}-${outputIndex}`}>
+                                            <TextInput
+                                              id={`output-service-scenario-${resultIndex}-${reverseIndex}-${outputIndex}`}
+                                              value={output.body?.service?.scenario ?? ''}
+                                              onChange={(_, value) =>
+                                                updateDraftArrayItem(['configurator', 'result'], resultIndex, (currentResult) => ({
+                                                  ...currentResult,
+                                                  reverse: updateItemAt(
+                                                    currentResult.reverse ?? [],
+                                                    reverseIndex,
+                                                    (currentReverse) => ({
+                                                      ...currentReverse,
+                                                      output: updateItemAt(
+                                                        currentReverse.output ?? [],
+                                                        outputIndex,
+                                                        (currentOutput) => ({
+                                                          ...currentOutput,
+                                                          body: {
+                                                            ...(currentOutput.body ?? {}),
+                                                            service: {
+                                                              ...(currentOutput.body?.service ?? {}),
+                                                              scenario: value,
+                                                            },
+                                                          },
+                                                        }),
+                                                      ),
+                                                    }),
+                                                  ),
+                                                }))
+                                              }
+                                            />
+                                          </FormGroup>
+                                          <FormGroup label="Service status" fieldId={`output-service-status-${resultIndex}-${reverseIndex}-${outputIndex}`}>
+                                            <TextInput
+                                              id={`output-service-status-${resultIndex}-${reverseIndex}-${outputIndex}`}
+                                              value={output.body?.service?.status ?? ''}
+                                              onChange={(_, value) =>
+                                                updateDraftArrayItem(['configurator', 'result'], resultIndex, (currentResult) => ({
+                                                  ...currentResult,
+                                                  reverse: updateItemAt(
+                                                    currentResult.reverse ?? [],
+                                                    reverseIndex,
+                                                    (currentReverse) => ({
+                                                      ...currentReverse,
+                                                      output: updateItemAt(
+                                                        currentReverse.output ?? [],
+                                                        outputIndex,
+                                                        (currentOutput) => ({
+                                                          ...currentOutput,
+                                                          body: {
+                                                            ...(currentOutput.body ?? {}),
+                                                            service: {
+                                                              ...(currentOutput.body?.service ?? {}),
+                                                              status: value,
+                                                            },
+                                                          },
+                                                        }),
+                                                      ),
+                                                    }),
+                                                  ),
+                                                }))
+                                              }
+                                            />
+                                          </FormGroup>
+                                          <FormGroup label="SLA duration value" fieldId={`output-sla-duration-${resultIndex}-${reverseIndex}-${outputIndex}`}>
+                                            <TextInput
+                                              id={`output-sla-duration-${resultIndex}-${reverseIndex}-${outputIndex}`}
+                                              value={output.body?.service?.sla?.durationValue ?? ''}
+                                              onChange={(_, value) =>
+                                                updateDraftArrayItem(['configurator', 'result'], resultIndex, (currentResult) => ({
+                                                  ...currentResult,
+                                                  reverse: updateItemAt(
+                                                    currentResult.reverse ?? [],
+                                                    reverseIndex,
+                                                    (currentReverse) => ({
+                                                      ...currentReverse,
+                                                      output: updateItemAt(
+                                                        currentReverse.output ?? [],
+                                                        outputIndex,
+                                                        (currentOutput) => ({
+                                                          ...currentOutput,
+                                                          body: {
+                                                            ...(currentOutput.body ?? {}),
+                                                            service: {
+                                                              ...(currentOutput.body?.service ?? {}),
+                                                              sla: {
+                                                                ...(currentOutput.body?.service?.sla ?? {}),
+                                                                durationValue: value,
+                                                              },
+                                                            },
+                                                          },
+                                                        }),
+                                                      ),
+                                                    }),
+                                                  ),
+                                                }))
+                                              }
+                                            />
+                                          </FormGroup>
+                                          <FormGroup
+                                            label="SLA duration unit code"
+                                            fieldId={`output-sla-duration-unit-${resultIndex}-${reverseIndex}-${outputIndex}`}
+                                          >
+                                            <TextInput
+                                              id={`output-sla-duration-unit-${resultIndex}-${reverseIndex}-${outputIndex}`}
+                                              value={output.body?.service?.sla?.durationUnit?.code ?? ''}
+                                              onChange={(_, value) =>
+                                                updateDraftArrayItem(['configurator', 'result'], resultIndex, (currentResult) => ({
+                                                  ...currentResult,
+                                                  reverse: updateItemAt(
+                                                    currentResult.reverse ?? [],
+                                                    reverseIndex,
+                                                    (currentReverse) => ({
+                                                      ...currentReverse,
+                                                      output: updateItemAt(
+                                                        currentReverse.output ?? [],
+                                                        outputIndex,
+                                                        (currentOutput) => ({
+                                                          ...currentOutput,
+                                                          body: {
+                                                            ...(currentOutput.body ?? {}),
+                                                            service: {
+                                                              ...(currentOutput.body?.service ?? {}),
+                                                              sla: {
+                                                                ...(currentOutput.body?.service?.sla ?? {}),
+                                                                durationUnit: {
+                                                                  ...(currentOutput.body?.service?.sla?.durationUnit ?? {}),
+                                                                  code: value,
+                                                                },
+                                                              },
+                                                            },
+                                                          },
+                                                        }),
+                                                      ),
+                                                    }),
+                                                  ),
+                                                }))
+                                              }
+                                            />
+                                          </FormGroup>
+                                          <FormGroup label="SLA status code" fieldId={`output-sla-status-${resultIndex}-${reverseIndex}-${outputIndex}`}>
+                                            <TextInput
+                                              id={`output-sla-status-${resultIndex}-${reverseIndex}-${outputIndex}`}
+                                              value={output.body?.service?.sla?.status?.code ?? ''}
+                                              onChange={(_, value) =>
+                                                updateDraftArrayItem(['configurator', 'result'], resultIndex, (currentResult) => ({
+                                                  ...currentResult,
+                                                  reverse: updateItemAt(
+                                                    currentResult.reverse ?? [],
+                                                    reverseIndex,
+                                                    (currentReverse) => ({
+                                                      ...currentReverse,
+                                                      output: updateItemAt(
+                                                        currentReverse.output ?? [],
+                                                        outputIndex,
+                                                        (currentOutput) => ({
+                                                          ...currentOutput,
+                                                          body: {
+                                                            ...(currentOutput.body ?? {}),
+                                                            service: {
+                                                              ...(currentOutput.body?.service ?? {}),
+                                                              sla: {
+                                                                ...(currentOutput.body?.service?.sla ?? {}),
+                                                                status: {
+                                                                  ...(currentOutput.body?.service?.sla?.status ?? {}),
+                                                                  code: value,
+                                                                },
+                                                              },
+                                                            },
+                                                          },
+                                                        }),
+                                                      ),
+                                                    }),
+                                                  ),
+                                                }))
+                                              }
+                                            />
+                                          </FormGroup>
+                                        </div>
+                                        <div className="stage-editor-subsection">
+                                          <Title headingLevel="h6">Output log</Title>
+                                          <FormGroup
+                                            label="Journal service name"
+                                            fieldId={`output-log-journal-${resultIndex}-${reverseIndex}-${outputIndex}`}
+                                          >
+                                            <TextInput
+                                              id={`output-log-journal-${resultIndex}-${reverseIndex}-${outputIndex}`}
+                                              value={output.log?.journalServiceName ?? ''}
+                                              onChange={(_, value) =>
+                                                updateDraftArrayItem(['configurator', 'result'], resultIndex, (currentResult) => ({
+                                                  ...currentResult,
+                                                  reverse: updateItemAt(
+                                                    currentResult.reverse ?? [],
+                                                    reverseIndex,
+                                                    (currentReverse) => ({
+                                                      ...currentReverse,
+                                                      output: updateItemAt(
+                                                        currentReverse.output ?? [],
+                                                        outputIndex,
+                                                        (currentOutput) => ({
+                                                          ...currentOutput,
+                                                          log: {
+                                                            ...(currentOutput.log ?? {}),
+                                                            journalServiceName: value,
+                                                          },
+                                                        }),
+                                                      ),
+                                                    }),
+                                                  ),
+                                                }))
+                                              }
+                                            />
+                                          </FormGroup>
+                                          <FormGroup label="Message" fieldId={`output-log-message-${resultIndex}-${reverseIndex}-${outputIndex}`}>
+                                            <TextArea
+                                              id={`output-log-message-${resultIndex}-${reverseIndex}-${outputIndex}`}
+                                              value={output.log?.message ?? ''}
+                                              onChange={(_, value) =>
+                                                updateDraftArrayItem(['configurator', 'result'], resultIndex, (currentResult) => ({
+                                                  ...currentResult,
+                                                  reverse: updateItemAt(
+                                                    currentResult.reverse ?? [],
+                                                    reverseIndex,
+                                                    (currentReverse) => ({
+                                                      ...currentReverse,
+                                                      output: updateItemAt(
+                                                        currentReverse.output ?? [],
+                                                        outputIndex,
+                                                        (currentOutput) => ({
+                                                          ...currentOutput,
+                                                          log: {
+                                                            ...(currentOutput.log ?? {}),
+                                                            message: value,
+                                                          },
+                                                        }),
+                                                      ),
+                                                    }),
+                                                  ),
+                                                }))
+                                              }
+                                              resizeOrientation="vertical"
+                                            />
+                                          </FormGroup>
+                                        </div>
+                                      </CardBody>
+                                    </Card>
+                                  ))}
+                                </div>
+                              </CardBody>
+                            </Card>
+                          ))}
+                        </div>
+                      </CardBody>
+                    </Card>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+
+          {selected.kind !== 'configurator' && (
+            <FormGroup label="Описание" fieldId="node-description">
+              <TextArea
+                id="node-description"
+                value={draft.description ?? ''}
+                onChange={(_, value) => setDraft((current) => ({ ...current, description: value }))}
+                resizeOrientation="vertical"
               />
             </FormGroup>
           )}
-
-          <FormGroup label="Описание" fieldId="node-description">
-            <TextArea
-              id="node-description"
-              value={draft.description ?? ''}
-              onChange={(_, value) => setDraft((current) => ({ ...current, description: value }))}
-              resizeOrientation="vertical"
-            />
-          </FormGroup>
 
           {selected.kind === 'subprocess' && (
             <FormGroup label="Trigger rule" fieldId="subprocess-trigger">
@@ -810,6 +1615,102 @@ function NodeEditor({ processConfig, selectedNodeId, onSave, onAddSubprocess, on
                     </button>
                   );
                 })}
+              </div>
+            </div>
+          )}
+
+          {selected.kind === 'configurator' && (
+            <div className="stage-editor-section">
+              <Title headingLevel="h4">Configurator</Title>
+              <div className="stage-editor-grid">
+                <Checkbox
+                  id="configurator-disabled"
+                  isChecked={Boolean(draft.disabled)}
+                  onChange={(_, checked) => updateDraftPath(['disabled'], checked)}
+                  label="Disabled"
+                />
+                <Checkbox
+                  id="configurator-interrupted"
+                  isChecked={Boolean(draft.interrupted)}
+                  onChange={(_, checked) => updateDraftPath(['interrupted'], checked)}
+                  label="Interrupted"
+                />
+                <Checkbox
+                  id="configurator-multiple"
+                  isChecked={Boolean(draft.multiple)}
+                  onChange={(_, checked) => updateDraftPath(['multiple'], checked)}
+                  label="Multiple"
+                />
+              </div>
+              <FormGroup label="Filter event rule" fieldId="configurator-filter-event-rule">
+                <TextInput
+                  id="configurator-filter-event-rule"
+                  value={draft.filterEventRule ?? ''}
+                  onChange={(_, value) => updateDraftPath(['filterEventRule'], value)}
+                />
+              </FormGroup>
+              <div className="stage-editor-subsection">
+                <Title headingLevel="h5">Audit</Title>
+                <div className="stage-editor-grid">
+                  <Checkbox
+                    id="configurator-audit-enabled"
+                    isChecked={Boolean(draft.audit?.enabled)}
+                    onChange={(_, checked) => updateDraftPath(['audit', 'enabled'], checked)}
+                    label="Enabled"
+                  />
+                </div>
+                <FormGroup label="Event code" fieldId="configurator-audit-event-code">
+                  <TextInput
+                    id="configurator-audit-event-code"
+                    value={draft.audit?.eventCode ?? ''}
+                    onChange={(_, value) => updateDraftPath(['audit', 'eventCode'], value)}
+                  />
+                </FormGroup>
+                <FormGroup label="Event description" fieldId="configurator-audit-event-description">
+                  <TextInput
+                    id="configurator-audit-event-description"
+                    value={draft.audit?.eventDescription ?? ''}
+                    onChange={(_, value) => updateDraftPath(['audit', 'eventDescription'], value)}
+                  />
+                </FormGroup>
+              </div>
+              <div className="stage-editor-subsection">
+                <div className="stage-editor-inline-header">
+                  <Title headingLevel="h5">Results</Title>
+                  <Button variant="secondary" onClick={() => addDraftArrayItem(['result'], createDefaultResult())}>
+                    Добавить result
+                  </Button>
+                </div>
+                {(draft.result ?? []).map((result, resultIndex) => (
+                  <Card key={result.dbId ?? `config-result-${resultIndex}`} className="stage-editor-card">
+                    <CardTitle>
+                      <div className="stage-editor-inline-header">
+                        <span>Result {resultIndex + 1}</span>
+                        <Button variant="link" onClick={() => removeDraftArrayItem(['result'], resultIndex)}>
+                          Удалить
+                        </Button>
+                      </div>
+                    </CardTitle>
+                    <CardBody>
+                      <FormGroup label="Input scenarios" fieldId={`config-result-input-scenarios-${resultIndex}`}>
+                        <TextArea
+                          id={`config-result-input-scenarios-${resultIndex}`}
+                          value={(result.inputScenarios ?? []).join('\n')}
+                          onChange={(_, value) =>
+                            updateDraftArrayItem(['result'], resultIndex, (currentResult) => ({
+                              ...currentResult,
+                              inputScenarios: value
+                                .split('\n')
+                                .map((item) => item.trim())
+                                .filter(Boolean),
+                            }))
+                          }
+                          resizeOrientation="vertical"
+                        />
+                      </FormGroup>
+                    </CardBody>
+                  </Card>
+                ))}
               </div>
             </div>
           )}
@@ -903,6 +1804,9 @@ export function App() {
       }
       (activeProcessConfig.process?.subprocess ?? []).forEach((subprocess) => {
         validNodeIds.add(`subprocess:${subprocess.dbId}`);
+        (subprocess.stages ?? []).forEach((stage) => {
+          validNodeIds.add(`stage:${stage.dbId}`);
+        });
       });
 
       const next = current.filter((nodeId) => validNodeIds.has(nodeId));
@@ -1040,7 +1944,7 @@ export function App() {
 
   const handleToggleNode = (nodeId) => {
     const [kind] = nodeId.split(':');
-    if (kind === 'stage') {
+    if (kind === 'configurator') {
       return;
     }
 
@@ -1263,6 +2167,7 @@ export function App() {
             onAddSubprocess={handleAddSubprocess}
             onAddStage={handleAddStage}
             onReorderStages={handleReorderStages}
+            contextCodeOptions={processCodeOptions}
             isSaving={updateState.loading}
           />
           {updateErrorMessage && (

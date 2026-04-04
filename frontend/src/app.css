@@ -291,6 +291,34 @@ body {
   margin-top: 1rem;
 }
 
+.stage-editor-section,
+.stage-editor-subsection {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(19, 38, 58, 0.12);
+}
+
+.stage-editor-grid {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.stage-editor-inline-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.stage-editor-card {
+  border: 1px solid rgba(19, 38, 58, 0.12);
+  box-shadow: none;
+  background: rgba(244, 247, 250, 0.72);
+}
+
 .stage-order-panel {
   display: grid;
   gap: 0.75rem;
