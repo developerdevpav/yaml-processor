@@ -153,16 +153,6 @@ class JpaGraphQlSchemaFactory(
         }
         append("}")
     }
-
-    private fun graphQlScalar(javaType: Class<*>): String = when (javaType) {
-        Boolean::class.java, Boolean::class.javaPrimitiveType -> "Boolean"
-        Int::class.java, Int::class.javaPrimitiveType,
-        Short::class.java, Short::class.javaPrimitiveType -> "Int"
-        Float::class.java, Float::class.javaPrimitiveType,
-        Double::class.java, Double::class.javaPrimitiveType,
-        java.math.BigDecimal::class.java -> "Float"
-        else -> "String"
-    }
 }
 
 @Component
