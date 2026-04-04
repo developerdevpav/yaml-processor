@@ -146,15 +146,16 @@ body {
 }
 
 .process-node:hover .process-node__edit,
-.process-node:focus-within .process-node__edit {
+.process-node:hover .process-node__action,
+.process-node:focus-within .process-node__edit,
+.process-node:focus-within .process-node__action {
   opacity: 1;
   transform: translateY(0);
 }
 
-.process-node__edit {
+.process-node__edit,
+.process-node__action {
   position: absolute;
-  top: 50%;
-  right: -1.25rem;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -172,7 +173,18 @@ body {
   box-shadow: 0 8px 18px rgba(10, 37, 64, 0.14);
 }
 
-.process-node__edit:hover {
+.process-node__edit {
+  top: 50%;
+  right: -1.25rem;
+}
+
+.process-node__action {
+  top: calc(50% - 2.7rem);
+  right: -1.25rem;
+}
+
+.process-node__edit:hover,
+.process-node__action:hover {
   background: #f2fbfd;
 }
 
@@ -277,6 +289,80 @@ body {
   gap: 0.75rem;
   flex-wrap: wrap;
   margin-top: 1rem;
+}
+
+.stage-order-panel {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(19, 38, 58, 0.12);
+}
+
+.stage-order-panel__header {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.stage-order-list {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.stage-order-item {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  width: 100%;
+  padding: 0.85rem 1rem;
+  border: 1px solid rgba(19, 38, 58, 0.12);
+  border-radius: 1rem;
+  background: rgba(244, 247, 250, 0.95);
+  color: inherit;
+  text-align: left;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+
+.stage-order-item:hover,
+.stage-order-item.dragging {
+  border-color: #126b8c;
+  box-shadow: 0 12px 24px rgba(18, 107, 140, 0.16);
+}
+
+.stage-order-item.dragging {
+  opacity: 0.72;
+  cursor: grabbing;
+}
+
+.stage-order-item__index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  background: #d7eef2;
+  color: #0f4c5c;
+  font-weight: 700;
+}
+
+.stage-order-item__content {
+  display: grid;
+  gap: 0.1rem;
+  flex: 1;
+}
+
+.stage-order-item__content small {
+  color: #486075;
+}
+
+.stage-order-item__handle {
+  color: #6f8495;
+  font-weight: 700;
+  letter-spacing: 0.12em;
 }
 
 .loading-state {

@@ -206,6 +206,17 @@ function getErrorMessage(error, fallback) {
   return error.message || fallback;
 }
 
+function reorderItems(items, fromIndex, toIndex) {
+  if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) {
+    return items;
+  }
+
+  const next = [...items];
+  const [moved] = next.splice(fromIndex, 1);
+  next.splice(toIndex, 0, moved);
+  return next;
+}
+
 function createDefaultStage(index) {
   return {
     id: false,
@@ -563,6 +574,10 @@ function ProcessNode({ data, selected }) {
     event.stopPropagation();
     data?.onEdit?.();
   };
+  const reorderStages = (event) => {
+    event.stopPropagation();
+    data?.onReorder?.();
+  };
 
   return (
     <div className={selected ? 'process-node selected' : 'process-node'}>
@@ -574,6 +589,22 @@ function ProcessNode({ data, selected }) {
           />
         </svg>
       </button>
+      {kind === 'subprocess' && (
+        <button
+          type="button"
+          className="process-node__action process-node__action-order"
+          onClick={reorderStages}
+          aria-label="Change stage order"
+          title="Change stage order"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true" className="process-node__edit-icon">
+            <path
+              d="M8 6h12v2H8V6zm0 5h12v2H8v-2zm0 5h12v2H8v-2zM4 7.5A1.5 1.5 0 1 1 4 4.5a1.5 1.5 0 0 1 0 3zm0 5A1.5 1.5 0 1 1 4 9.5a1.5 1.5 0 0 1 0 3zm0 5A1.5 1.5 0 1 1 4 14.5a1.5 1.5 0 0 1 0 3z"
+              fill="currentColor"
+            />
+          </svg>
+        </button>
+      )}
       <div className="process-node__kind">{kind}</div>
       <div className="process-node__title">{title}</div>
       <div className="process-node__subtitle">{subtitle || 'Без описания'}</div>
@@ -582,7 +613,7 @@ function ProcessNode({ data, selected }) {
   );
 }
 
-function ProcessTopology({ processConfig, selectedNodeId, expandedNodeIds, onToggleNode, onEditNode }) {
+function ProcessTopology({ processConfig, selectedNodeId, expandedNodeIds, onToggleNode, onEditNode, onReorderSubprocessNode }) {
   const [graph, setGraph] = useState({ nodes: [], edges: [] });
 
   useEffect(() => {
@@ -599,6 +630,7 @@ function ProcessTopology({ processConfig, selectedNodeId, expandedNodeIds, onTog
             data: {
               ...node.data,
               onEdit: () => onEditNode(node.id),
+              onReorder: node.data.kind === 'subprocess' ? () => onReorderSubprocessNode(node.id) : undefined,
             },
           }))}
           edges={graph.edges}
@@ -618,19 +650,73 @@ function ProcessTopology({ processConfig, selectedNodeId, expandedNodeIds, onTog
   );
 }
 
-function NodeEditor({ processConfig, selectedNodeId, onSave, onAddSubprocess, onAddStage, isSaving }) {
+function NodeEditor({ processConfig, selectedNodeId, onSave, onAddSubprocess, onAddStage, onReorderStages, isSaving }) {
   const selected = findSelectedNode(processConfig, selectedNodeId);
   const [draft, setDraft] = useState({});
+  const [stageOrder, setStageOrder] = useState([]);
+  const [draggedStageId, setDraggedStageId] = useState(null);
+  const selectedSubprocessStageIds =
+    selected?.kind === 'subprocess' ? (selected.node?.stages ?? []).map((stage) => String(stage.dbId)).join('|') : '';
 
   useEffect(() => {
     setDraft(selected?.node ?? {});
   }, [selectedNodeId, processConfig]);
+
+  useEffect(() => {
+    if (selected?.kind !== 'subprocess') {
+      setStageOrder([]);
+      setDraggedStageId(null);
+      return;
+    }
+
+    setStageOrder((selected.node?.stages ?? []).map((stage) => String(stage.dbId)));
+    setDraggedStageId(null);
+  }, [selectedNodeId, selected?.kind, selectedSubprocessStageIds]);
 
   if (!selected) {
     return null;
   }
 
   const save = () => onSave(draft);
+  const orderedStages =
+    selected.kind === 'subprocess'
+      ? stageOrder
+          .map((stageId) => (selected.node?.stages ?? []).find((stage) => String(stage.dbId) === stageId))
+          .filter(Boolean)
+      : [];
+
+  const handlePointerDown = (stageId) => {
+    setDraggedStageId(stageId);
+  };
+
+  const handlePointerEnter = (targetStageId) => {
+    if (!draggedStageId || draggedStageId === targetStageId) {
+      return;
+    }
+
+    const fromIndex = stageOrder.indexOf(draggedStageId);
+    const toIndex = stageOrder.indexOf(targetStageId);
+    if (fromIndex < 0 || toIndex < 0) {
+      return;
+    }
+
+    setStageOrder((current) => reorderItems(current, fromIndex, toIndex));
+  };
+
+  const handlePointerUp = async () => {
+    const nextStageOrder = [...stageOrder];
+    setDraggedStageId(null);
+
+    if (selected.kind !== 'subprocess' || !selected.node?.dbId) {
+      return;
+    }
+
+    if (nextStageOrder.join('|') === selectedSubprocessStageIds) {
+      return;
+    }
+
+    await onReorderStages(String(selected.node.dbId), nextStageOrder);
+  };
 
   return (
     <Card className="editor-card">
@@ -682,6 +768,42 @@ function NodeEditor({ processConfig, selectedNodeId, onSave, onAddSubprocess, on
                 }
               />
             </FormGroup>
+          )}
+
+          {selected.kind === 'subprocess' && (
+            <div className="stage-order-panel">
+              <div className="stage-order-panel__header">
+                <Title headingLevel="h4">Порядок stages</Title>
+                <Text component="small">Перетащите stage. После отпускания порядок сохранится сразу.</Text>
+              </div>
+              <div className="stage-order-list">
+                {orderedStages.map((stage, index) => {
+                  const stageId = String(stage.dbId);
+                  return (
+                    <button
+                      key={stageId}
+                      type="button"
+                      className={draggedStageId === stageId ? 'stage-order-item dragging' : 'stage-order-item'}
+                      onPointerDown={() => handlePointerDown(stageId)}
+                      onPointerEnter={() => handlePointerEnter(stageId)}
+                      onPointerUp={handlePointerUp}
+                      onPointerLeave={(event) => {
+                        if (event.buttons === 0 && draggedStageId) {
+                          handlePointerUp();
+                        }
+                      }}
+                    >
+                      <span className="stage-order-item__index">{index + 1}</span>
+                      <span className="stage-order-item__content">
+                        <strong>{stage.executor || 'stage'}</strong>
+                        <small>{stage.description || 'Без описания'}</small>
+                      </span>
+                      <span className="stage-order-item__handle">::</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           )}
 
           <div className="editor-actions">
@@ -905,6 +1027,11 @@ export function App() {
     setIsEditorOpen(true);
   };
 
+  const handleReorderSubprocessNode = (nodeId) => {
+    setSelectedNodeId(nodeId);
+    setIsEditorOpen(true);
+  };
+
   const handleCloseEditor = () => {
     setIsEditorOpen(false);
     setSelectedNodeId(null);
@@ -922,6 +1049,35 @@ export function App() {
     }
 
     await container.requestFullscreen();
+  };
+
+  const handleReorderStages = async (subprocessId, nextStageOrder) => {
+    if (!activeProcessConfig?.process) {
+      return;
+    }
+
+    const nextConfig = {
+      ...activeProcessConfig,
+      process: {
+        ...activeProcessConfig.process,
+        subprocess: (activeProcessConfig.process.subprocess ?? []).map((subprocess) => {
+          if (String(subprocess.dbId) !== subprocessId) {
+            return subprocess;
+          }
+
+          const reorderedStages = nextStageOrder
+            .map((stageId) => (subprocess.stages ?? []).find((stage) => String(stage.dbId) === stageId))
+            .filter(Boolean);
+
+          return {
+            ...subprocess,
+            stages: reorderedStages,
+          };
+        }),
+      },
+    };
+
+    await saveProcessConfig(nextConfig);
   };
 
   return (
@@ -1042,11 +1198,12 @@ export function App() {
                     <ProcessTopology
                       processConfig={activeProcessConfig}
                       selectedNodeId={selectedNodeId}
-                      expandedNodeIds={expandedNodeIds}
-                      onToggleNode={handleToggleNode}
-                      onEditNode={handleEditNode}
-                    />
-                  )}
+                    expandedNodeIds={expandedNodeIds}
+                    onToggleNode={handleToggleNode}
+                    onEditNode={handleEditNode}
+                    onReorderSubprocessNode={handleReorderSubprocessNode}
+                  />
+                )}
                 </CardBody>
               </Card>
             </div>
@@ -1078,6 +1235,7 @@ export function App() {
             onSave={handleSaveNode}
             onAddSubprocess={handleAddSubprocess}
             onAddStage={handleAddStage}
+            onReorderStages={handleReorderStages}
             isSaving={updateState.loading}
           />
           {updateErrorMessage && (
