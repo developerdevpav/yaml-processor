@@ -198,6 +198,18 @@ const UPDATE_STAGE_NODE = gql`
   }
 `;
 
+const UPDATE_PROCESS_NODE = gql`
+  mutation UpdateProcessNode($id: ID!, $input: ProcessInput!) {
+    updateProcessNode(id: $id, input: $input) {
+      dbId
+      description
+      contextCode {
+        code
+      }
+    }
+  }
+`;
+
 const EMPTY_PROCESS_FORM = {
   code: '',
   description: '',
@@ -1857,6 +1869,9 @@ export function App() {
   const [updateStageNode, updateStageState] = useMutation(UPDATE_STAGE_NODE, {
     fetchPolicy: 'no-cache',
   });
+  const [updateProcessNode, updateProcessNodeState] = useMutation(UPDATE_PROCESS_NODE, {
+    fetchPolicy: 'no-cache',
+  });
   const [form, setForm] = useState(EMPTY_PROCESS_FORM);
   const [selectedConfigId, setSelectedConfigId] = useState(null);
   const [selectedNodeId, setSelectedNodeId] = useState(null);
@@ -1988,6 +2003,36 @@ export function App() {
     }
   };
 
+  const saveProcessNode = async (nextConfig) => {
+    if (!selectedNodeId?.startsWith('process:')) {
+      return;
+    }
+
+    const processId = selectedNodeId.split(':')[1];
+    const selectedProcess = findSelectedNode(nextConfig, selectedNodeId)?.node;
+    if (!selectedProcess) {
+      return;
+    }
+
+    try {
+      setUpdateErrorMessage('');
+      setLocalProcessConfig(nextConfig);
+      await updateProcessNode({
+        variables: {
+          id: processId,
+          input: {
+            description: selectedProcess.description ?? '',
+            contextCode: normalizeReferenceDraft(selectedProcess.contextCode),
+          },
+        },
+      });
+      refetch();
+    } catch (mutationError) {
+      setLocalProcessConfig(serverActiveProcessConfig);
+      setUpdateErrorMessage(getErrorMessage(mutationError, 'Не удалось сохранить изменения process.'));
+    }
+  };
+
   const handleCreateProcess = async (event) => {
     event.preventDefault();
     setCreateErrorMessage('');
@@ -2031,6 +2076,10 @@ export function App() {
     }
 
     const nextConfig = updateSelectedNode(activeProcessConfig, selectedNodeId, values);
+    if (selectedNodeId.startsWith('process:')) {
+      await saveProcessNode(nextConfig);
+      return;
+    }
     if (selectedNodeId.startsWith('stage:')) {
       await saveStageNode(nextConfig);
       return;
@@ -2312,7 +2361,7 @@ export function App() {
             onAddStage={handleAddStage}
             onReorderStages={handleReorderStages}
             contextCodeOptions={processCodeOptions}
-            isSaving={updateState.loading || updateStageState.loading}
+            isSaving={updateState.loading || updateStageState.loading || updateProcessNodeState.loading}
           />
           {updateErrorMessage && (
             <Alert isInline variant="danger" title={updateErrorMessage} className="form-alert" />

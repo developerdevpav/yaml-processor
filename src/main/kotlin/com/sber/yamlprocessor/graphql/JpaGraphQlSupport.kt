@@ -1,6 +1,8 @@
 package com.sber.yamlprocessor.graphql
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.sber.yamlprocessor.model.ContextCodesDictionary
+import com.sber.yamlprocessor.model.Process
 import com.sber.yamlprocessor.model.Stage
 import graphql.schema.idl.RuntimeWiring
 import jakarta.persistence.ElementCollection
@@ -67,7 +69,10 @@ class JpaGraphQlSchemaFactory(
                     "  update${entity.name}(id: ID!, input: ${entity.inputName}!): ${entity.name}!",
                     "  delete${entity.name}(id: ID!): Boolean!"
                 )
-            } + listOf("  updateStageNode(id: ID!, input: StageInput!): Stage!")
+            } + listOf(
+                "  updateStageNode(id: ID!, input: StageInput!): Stage!",
+                "  updateProcessNode(id: ID!, input: ProcessInput!): Process!"
+            )
 
         val types = registry.entities.values.joinToString("\n\n") { renderComplexType(it) }
         val embeddables = registry.embeddables.values.joinToString("\n\n") { renderComplexType(it) }
@@ -178,6 +183,10 @@ class JpaGraphQlRuntimeWiringConfigurer(
                 @Suppress("UNCHECKED_CAST")
                 service.updateStageNode(env.getArgument("id"), env.getArgument<Map<String, Any?>>("input"))
             }
+            type.dataFetcher("updateProcessNode") { env ->
+                @Suppress("UNCHECKED_CAST")
+                service.updateProcessNode(env.getArgument("id"), env.getArgument<Map<String, Any?>>("input"))
+            }
             type
         }
     }
@@ -243,6 +252,33 @@ class JpaGraphQlCrudService(
         entityManager.flush()
         initializeGraph(merged, entity)
         return merged as Stage
+    }
+
+    @Transactional
+    fun updateProcessNode(id: Any?, input: Map<String, Any?>): Process {
+        val entity = registry.entity(Process::class.java)
+        val entityId = convertId(id, entity.idJavaType)
+        val current = entityManager.find(Process::class.java, entityId)
+            ?: error("Process with id=$entityId not found")
+
+        if (input.containsKey("description")) {
+            current.description = input["description"]?.toString() ?: ""
+        }
+
+        if (input.containsKey("contextCode")) {
+            @Suppress("UNCHECKED_CAST")
+            val contextInput = input["contextCode"] as Map<String, Any?>?
+            val contextCode = contextInput?.get("code")?.toString()?.trim().orEmpty()
+            current.contextCode = if (contextCode.isBlank()) {
+                null
+            } else {
+                entityManager.getReference(ContextCodesDictionary::class.java, contextCode)
+            }
+        }
+
+        entityManager.flush()
+        initializeGraph(current, entity)
+        return current
     }
 
     @Transactional
