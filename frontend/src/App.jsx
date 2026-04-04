@@ -20,9 +20,8 @@ import {
   TextInput,
   Title,
 } from '@patternfly/react-core';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import ReactFlow, {
-  Background,
   Controls,
   MarkerType,
   Position,
@@ -375,37 +374,28 @@ function buildTopologyModel(processConfig, expandedNodeIds = []) {
 
   const nodeWidth = 220;
   const nodeHeight = 92;
-  const laneGap = 56;
-  const processColumnX = 32;
-  const subprocessColumnX = 352;
-  const stageColumnX = 672;
-  const stageColumnGap = 240;
-  const stageRowGap = 136;
-  const stagesPerRow = 2;
+  const columnGap = 56;
+  const rowGap = 136;
+  const processY = 32;
+  const subprocessY = processY + rowGap;
   const subprocessLayouts = (processConfig.process.subprocess ?? []).map((subprocess) => {
-    const stageCount = subprocess.stages?.length ?? 0;
-    const stageRows = Math.max(Math.ceil(stageCount / stagesPerRow), 1);
-    const stageClusterHeight = nodeHeight + (stageRows - 1) * stageRowGap;
-    const laneHeight = Math.max(nodeHeight, stageClusterHeight);
-
     return {
       subprocess,
-      laneHeight,
-      stageClusterHeight,
+      laneWidth: nodeWidth,
     };
   });
   const processNodeId = `process:${processConfig.process.dbId}`;
-  const totalHeight =
-    subprocessLayouts.reduce((sum, item) => sum + item.laneHeight, 0) +
-    Math.max(subprocessLayouts.length - 1, 0) * laneGap;
-  const processY = Math.max((totalHeight - nodeHeight) / 2, 32);
+  const totalWidth =
+    subprocessLayouts.reduce((sum, item) => sum + item.laneWidth, 0) +
+    Math.max(subprocessLayouts.length - 1, 0) * columnGap;
+  const processX = Math.max((totalWidth - nodeWidth) / 2, 32);
 
   nodes.push({
     id: processNodeId,
     type: 'processNode',
-    position: { x: processColumnX, y: processY },
-    sourcePosition: Position.Right,
-    targetPosition: Position.Left,
+    position: { x: processX, y: processY },
+    sourcePosition: Position.Bottom,
+    targetPosition: Position.Top,
     data: {
       title: processConfig.process.id || 'process',
       kind: 'process',
@@ -415,11 +405,10 @@ function buildTopologyModel(processConfig, expandedNodeIds = []) {
     },
   });
 
-  let currentLaneY = 32;
-  subprocessLayouts.forEach(({ subprocess, laneHeight, stageClusterHeight }) => {
+  let currentLaneX = 32;
+  subprocessLayouts.forEach(({ subprocess, laneWidth }) => {
     const subprocessNodeId = `subprocess:${subprocess.dbId}`;
-    const subprocessY = currentLaneY + (laneHeight - nodeHeight) / 2;
-    const stageClusterStartY = currentLaneY + (laneHeight - stageClusterHeight) / 2;
+    const subprocessX = currentLaneX + (laneWidth - nodeWidth) / 2;
     const processExpanded = expandedSet.has(processNodeId);
 
     if (!processExpanded) {
@@ -429,9 +418,9 @@ function buildTopologyModel(processConfig, expandedNodeIds = []) {
     nodes.push({
       id: subprocessNodeId,
       type: 'processNode',
-      position: { x: subprocessColumnX, y: subprocessY },
-      sourcePosition: Position.Right,
-      targetPosition: Position.Left,
+      position: { x: subprocessX, y: subprocessY },
+      sourcePosition: Position.Bottom,
+      targetPosition: Position.Top,
       data: {
         title: subprocess.id || 'subprocess',
         kind: 'subprocess',
@@ -450,22 +439,19 @@ function buildTopologyModel(processConfig, expandedNodeIds = []) {
     });
 
     if (!expandedSet.has(subprocessNodeId)) {
-      currentLaneY += laneHeight + laneGap;
+      currentLaneX += laneWidth + columnGap;
       return;
     }
 
     (subprocess.stages ?? []).forEach((stage, stageIndex) => {
       const stageNodeId = `stage:${stage.dbId}`;
-      const stageColumn = stageIndex % stagesPerRow;
-      const stageRow = Math.floor(stageIndex / stagesPerRow);
-      const stageX = stageColumnX + stageColumn * stageColumnGap;
-      const stageY = stageClusterStartY + stageRow * stageRowGap;
+      const stageY = subprocessY + rowGap * (stageIndex + 1);
       nodes.push({
         id: stageNodeId,
         type: 'processNode',
-        position: { x: stageX, y: stageY },
-        sourcePosition: Position.Right,
-        targetPosition: Position.Left,
+        position: { x: subprocessX, y: stageY },
+        sourcePosition: Position.Bottom,
+        targetPosition: Position.Top,
         data: {
           title: stage.executor || 'stage',
           kind: 'stage',
@@ -484,7 +470,7 @@ function buildTopologyModel(processConfig, expandedNodeIds = []) {
       });
     });
 
-    currentLaneY += laneHeight + laneGap;
+    currentLaneX += laneWidth + columnGap;
   });
 
   return { nodes, edges };
@@ -580,8 +566,13 @@ function ProcessNode({ data, selected }) {
 
   return (
     <div className={selected ? 'process-node selected' : 'process-node'}>
-      <button type="button" className="process-node__edit" onClick={editNode}>
-        Edit
+      <button type="button" className="process-node__edit" onClick={editNode} aria-label="Edit node" title="Edit">
+        <svg viewBox="0 0 24 24" aria-hidden="true" className="process-node__edit-icon">
+          <path
+            d="M4 17.25V20h2.75L17.81 8.94l-2.75-2.75L4 17.25zm15.71-9.04a1.003 1.003 0 0 0 0-1.42l-2.5-2.5a1.003 1.003 0 0 0-1.42 0l-1.96 1.96 2.75 2.75 1.13-1.13z"
+            fill="currentColor"
+          />
+        </svg>
       </button>
       <div className="process-node__kind">{kind}</div>
       <div className="process-node__title">{title}</div>
@@ -620,7 +611,6 @@ function ProcessTopology({ processConfig, selectedNodeId, expandedNodeIds, onTog
           onNodeClick={(_, node) => onToggleNode(node.id)}
           proOptions={{ hideAttribution: true }}
         >
-          <Background gap={24} size={1} color="rgba(19, 38, 58, 0.09)" />
           <Controls position="top-right" showInteractive={false} />
         </ReactFlow>
       </div>
@@ -734,6 +724,8 @@ export function App() {
   const [expandedNodeIds, setExpandedNodeIds] = useState([]);
   const [createErrorMessage, setCreateErrorMessage] = useState('');
   const [updateErrorMessage, setUpdateErrorMessage] = useState('');
+  const [isTopologyFullscreen, setIsTopologyFullscreen] = useState(false);
+  const topologyContainerRef = useRef(null);
 
   const processConfigs = data?.processConfigList ?? [];
   const processCodeOptions = (data?.contextCodesDictionaryList ?? []).map((item) => item.code).filter(Boolean);
@@ -774,6 +766,19 @@ export function App() {
       return next.length === current.length ? current : next;
     });
   }, [activeProcessConfig]);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsTopologyFullscreen(document.fullscreenElement === topologyContainerRef.current);
+      window.dispatchEvent(new Event('resize'));
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    };
+  }, []);
 
   const saveProcessConfig = async (nextConfig) => {
     try {
@@ -899,6 +904,20 @@ export function App() {
     setSelectedNodeId(nodeId);
   };
 
+  const handleToggleTopologyFullscreen = async () => {
+    const container = topologyContainerRef.current;
+    if (!container) {
+      return;
+    }
+
+    if (document.fullscreenElement === container) {
+      await document.exitFullscreen();
+      return;
+    }
+
+    await container.requestFullscreen();
+  };
+
   return (
     <Page>
       <PageSection className="hero-section">
@@ -978,43 +997,53 @@ export function App() {
           </SplitItem>
 
           <SplitItem isFilled className="canvas-column">
-            <Card className="canvas-card">
-              <CardTitle>Topology graph</CardTitle>
-              <CardBody className="canvas-card-body">
-                {loading && (
-                  <div className="loading-state">
-                    <Spinner size="xl" />
-                  </div>
-                )}
+            <div
+              ref={topologyContainerRef}
+              className={isTopologyFullscreen ? 'topology-shell topology-shell-fullscreen' : 'topology-shell'}
+            >
+              <Card className="canvas-card">
+                <div className="canvas-card-header">
+                  <CardTitle>Topology graph</CardTitle>
+                  <Button variant="secondary" onClick={handleToggleTopologyFullscreen}>
+                    {isTopologyFullscreen ? 'Свернуть экран' : 'На весь экран'}
+                  </Button>
+                </div>
+                <CardBody className="canvas-card-body">
+                  {loading && (
+                    <div className="loading-state">
+                      <Spinner size="xl" />
+                    </div>
+                  )}
 
-                {error && (
-                  <EmptyState>
-                    <Title headingLevel="h4">GraphQL недоступен</Title>
-                    <EmptyStateBody>{error.message}</EmptyStateBody>
-                    <EmptyStateFooter>
-                      <Button onClick={() => refetch()}>Повторить запрос</Button>
-                    </EmptyStateFooter>
-                  </EmptyState>
-                )}
+                  {error && (
+                    <EmptyState>
+                      <Title headingLevel="h4">GraphQL недоступен</Title>
+                      <EmptyStateBody>{error.message}</EmptyStateBody>
+                      <EmptyStateFooter>
+                        <Button onClick={() => refetch()}>Повторить запрос</Button>
+                      </EmptyStateFooter>
+                    </EmptyState>
+                  )}
 
-                {!loading && !error && !activeProcessConfig && (
-                  <EmptyState>
-                    <Title headingLevel="h4">Процессов пока нет</Title>
-                    <EmptyStateBody>Создайте первый процесс слева, затем соберите дерево из subprocess и stage.</EmptyStateBody>
-                  </EmptyState>
-                )}
+                  {!loading && !error && !activeProcessConfig && (
+                    <EmptyState>
+                      <Title headingLevel="h4">Процессов пока нет</Title>
+                      <EmptyStateBody>Создайте первый процесс слева, затем соберите дерево из subprocess и stage.</EmptyStateBody>
+                    </EmptyState>
+                  )}
 
-                {!loading && !error && activeProcessConfig && (
-                  <ProcessTopology
-                    processConfig={activeProcessConfig}
-                    selectedNodeId={selectedNodeId}
-                    expandedNodeIds={expandedNodeIds}
-                    onToggleNode={handleToggleNode}
-                    onEditNode={handleEditNode}
-                  />
-                )}
-              </CardBody>
-            </Card>
+                  {!loading && !error && activeProcessConfig && (
+                    <ProcessTopology
+                      processConfig={activeProcessConfig}
+                      selectedNodeId={selectedNodeId}
+                      expandedNodeIds={expandedNodeIds}
+                      onToggleNode={handleToggleNode}
+                      onEditNode={handleEditNode}
+                    />
+                  )}
+                </CardBody>
+              </Card>
+            </div>
           </SplitItem>
 
           <SplitItem isFilled={false} className="editor-column">
