@@ -62,3 +62,7 @@ yaml-files/
 
 # H2 file database (./data/yaml_processor.mv.db)
 data/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/

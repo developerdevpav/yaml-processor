@@ -14,6 +14,7 @@ import jakarta.persistence.OneToOne
 import jakarta.persistence.metamodel.Attribute
 import jakarta.persistence.metamodel.EntityType
 import jakarta.persistence.metamodel.PluralAttribute
+import org.hibernate.Hibernate
 import org.hibernate.annotations.Immutable
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -27,6 +28,8 @@ import java.lang.reflect.Field
 import java.lang.reflect.Member
 import java.lang.reflect.Modifier
 import java.nio.charset.StandardCharsets
+import java.util.Collections
+import java.util.IdentityHashMap
 
 @Configuration
 class JpaGraphQlConfiguration {
@@ -184,12 +187,14 @@ class JpaGraphQlCrudService(
     @Transactional(readOnly = true)
     fun findById(entity: EntityMetadata, id: Any?): Any? =
         entityManager.find(entity.javaType, convertId(id, entity.idJavaType))
+            ?.also { initializeGraph(it, entity) }
 
     @Transactional(readOnly = true)
     fun findAll(entity: EntityMetadata): List<Any> =
         entityManager.createQuery("select e from ${entity.jpaName} e", entity.javaType)
             .resultList
             .map { it as Any }
+            .onEach { initializeGraph(it, entity) }
 
     @Transactional
     fun create(entity: EntityMetadata, input: Map<String, Any?>): Any {
@@ -197,16 +202,22 @@ class JpaGraphQlCrudService(
         sanitize(instance, entity)
         entityManager.persist(instance)
         entityManager.flush()
+        initializeGraph(instance, entity)
         return instance
     }
 
     @Transactional
     fun update(entity: EntityMetadata, id: Any?, input: Map<String, Any?>): Any {
+        val entityId = convertId(id, entity.idJavaType)
+        val current = entityManager.find(entity.javaType, entityId)
+            ?: error("${entity.name} with id=$entityId not found")
         val instance = objectMapper.convertValue(input, entity.javaType)
-        setFieldValue(instance, entity.idField.name, convertId(id, entity.idJavaType))
+        setFieldValue(instance, entity.idField.name, entityId)
+        alignChildIdentifiers(current, instance, entity)
         sanitize(instance, entity)
         val merged = entityManager.merge(instance)
         entityManager.flush()
+        initializeGraph(merged, entity)
         return merged
     }
 
@@ -231,7 +242,12 @@ class JpaGraphQlCrudService(
                 FieldKind.ENTITY_REFERENCE -> {
                     val target = registry.entity(field.targetClass)
                     val refId = getFieldValue(current, target.idField.name)
-                        ?: error("Reference ${field.name} must include ${target.idField.name}")
+                    if (refId == null) {
+                        if (isInMemoryBackReference(current, value, target)) {
+                            return@forEach
+                        }
+                        error("Reference ${field.name} must include ${target.idField.name}")
+                    }
                     setFieldValue(value, field.name, entityManager.getReference(target.javaType, convertId(refId, target.idJavaType)))
                 }
                 FieldKind.ENTITY_CHILD -> {
@@ -243,6 +259,94 @@ class JpaGraphQlCrudService(
                     (current as Iterable<Any>).forEach { child ->
                         field.inverseField?.let { setFieldValue(child, it, value) }
                         sanitize(child, registry.entity(field.targetClass))
+                    }
+                }
+            }
+        }
+    }
+
+    private fun isInMemoryBackReference(reference: Any, owner: Any, target: EntityMetadata): Boolean =
+        target.fields
+            .filter { candidate ->
+                candidate.kind == FieldKind.ENTITY_CHILD || candidate.kind == FieldKind.ENTITY_CHILD_COLLECTION
+            }
+            .any { candidate ->
+                val linked = getFieldValue(reference, candidate.name) ?: return@any false
+                when (candidate.kind) {
+                    FieldKind.ENTITY_CHILD -> linked === owner
+                    FieldKind.ENTITY_CHILD_COLLECTION -> (linked as? Iterable<*>)?.any { it === owner } == true
+                    else -> false
+                }
+            }
+
+    private fun alignChildIdentifiers(current: Any?, incoming: Any?, type: ComplexTypeMetadata) {
+        if (current == null || incoming == null) {
+            return
+        }
+
+        if (type is EntityMetadata && getFieldValue(incoming, type.idField.name) == null) {
+            setFieldValue(incoming, type.idField.name, getFieldValue(current, type.idField.name))
+        }
+
+        type.fields.forEach { field ->
+            val currentValue = getFieldValue(current, field.name) ?: return@forEach
+            val incomingValue = getFieldValue(incoming, field.name) ?: return@forEach
+
+            when (field.kind) {
+                FieldKind.SCALAR, FieldKind.SCALAR_COLLECTION, FieldKind.ENTITY_REFERENCE -> Unit
+                FieldKind.EMBEDDED -> alignChildIdentifiers(
+                    currentValue,
+                    incomingValue,
+                    registry.complexType(field.targetClass)
+                )
+                FieldKind.ENTITY_CHILD -> alignChildIdentifiers(
+                    currentValue,
+                    incomingValue,
+                    registry.entity(field.targetClass)
+                )
+                FieldKind.ENTITY_CHILD_COLLECTION -> {
+                    val childType = registry.entity(field.targetClass)
+                    val currentItems = (currentValue as? Iterable<*>)?.toList().orEmpty()
+                    val incomingItems = (incomingValue as? Iterable<*>)?.toList().orEmpty()
+                    incomingItems.forEachIndexed { index, child ->
+                        val existingChild = currentItems.getOrNull(index) ?: return@forEachIndexed
+                        if (child != null) {
+                            alignChildIdentifiers(existingChild, child, childType)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun initializeGraph(value: Any?, type: ComplexTypeMetadata) {
+        val visited = Collections.newSetFromMap(IdentityHashMap<Any, Boolean>())
+        initializeGraph(value, type, visited)
+    }
+
+    private fun initializeGraph(value: Any?, type: ComplexTypeMetadata, visited: MutableSet<Any>) {
+        if (value == null || !visited.add(value)) {
+            return
+        }
+
+        type.fields.forEach { field ->
+            val current = getFieldValue(value, field.name) ?: return@forEach
+            when (field.kind) {
+                FieldKind.SCALAR, FieldKind.SCALAR_COLLECTION -> Hibernate.initialize(current)
+                FieldKind.EMBEDDED -> initializeGraph(current, registry.complexType(field.targetClass), visited)
+                FieldKind.ENTITY_REFERENCE -> {
+                    Hibernate.initialize(current)
+                    initializeGraph(current, registry.entity(field.targetClass), visited)
+                }
+                FieldKind.ENTITY_CHILD -> {
+                    Hibernate.initialize(current)
+                    initializeGraph(current, registry.entity(field.targetClass), visited)
+                }
+                FieldKind.ENTITY_CHILD_COLLECTION -> {
+                    Hibernate.initialize(current)
+                    @Suppress("UNCHECKED_CAST")
+                    (current as Iterable<Any>).forEach { child ->
+                        initializeGraph(child, registry.entity(field.targetClass), visited)
                     }
                 }
             }

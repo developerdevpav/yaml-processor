@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GraphiQL</title>
+    <style>
+        html, body, #graphiql {
+            height: 100%;
+            margin: 0;
+        }
+    </style>
+    <link rel="stylesheet" href="/css/graphiql.min.css">
+    <script src="/js/react.production.min.js"></script>
+    <script src="/js/react-dom.production.min.js"></script>
+    <script src="/js/graphiql.min.js"></script>
+</head>
+<body>
+<div id="graphiql">Loading...</div>
+<script>
+    const fetcher = GraphiQL.createFetcher({
+        url: `${window.location.origin}/graphql`
+    });
+
+    ReactDOM.render(
+        React.createElement(GraphiQL, {
+            fetcher: fetcher,
+            defaultEditorToolsVisibility: true,
+            headerEditorEnabled: true,
+            shouldPersistHeaders: true
+        }),
+        document.getElementById('graphiql')
+    );
+</script>
+</body>
+</html>
