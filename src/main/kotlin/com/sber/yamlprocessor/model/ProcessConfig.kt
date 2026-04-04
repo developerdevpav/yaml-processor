@@ -1,6 +1,5 @@
 package com.sber.yamlprocessor.model
 
-import com.fasterxml.jackson.annotation.JsonIgnore
 import jakarta.persistence.CascadeType
 import jakarta.persistence.Entity
 import jakarta.persistence.OneToOne
