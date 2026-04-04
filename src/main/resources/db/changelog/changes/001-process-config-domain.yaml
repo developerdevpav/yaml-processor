@@ -8,10 +8,19 @@ databaseChangeLog:
             columns:
               - column:
                   name: id
-                  type: BIGINT
-                  autoIncrement: true
+                  type: UUID
                   constraints:
                     primaryKey: true
+                    nullable: false
+              - column:
+                  name: created_at
+                  type: TIMESTAMP
+                  constraints:
+                    nullable: false
+              - column:
+                  name: updated_at
+                  type: TIMESTAMP
+                  constraints:
                     nullable: false
 
         - createTable:
@@ -19,17 +28,26 @@ databaseChangeLog:
             columns:
               - column:
                   name: id
-                  type: BIGINT
-                  autoIncrement: true
+                  type: UUID
                   constraints:
                     primaryKey: true
                     nullable: false
               - column:
                   name: process_config_id
-                  type: BIGINT
+                  type: UUID
                   constraints:
                     nullable: false
                     unique: true
+              - column:
+                  name: created_at
+                  type: TIMESTAMP
+                  constraints:
+                    nullable: false
+              - column:
+                  name: updated_at
+                  type: TIMESTAMP
+                  constraints:
+                    nullable: false
               - column:
                   name: business_id
                   type: VARCHAR(255)
@@ -59,14 +77,23 @@ databaseChangeLog:
             columns:
               - column:
                   name: id
-                  type: BIGINT
-                  autoIncrement: true
+                  type: UUID
                   constraints:
                     primaryKey: true
                     nullable: false
               - column:
                   name: process_id
-                  type: BIGINT
+                  type: UUID
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_at
+                  type: TIMESTAMP
+                  constraints:
+                    nullable: false
+              - column:
+                  name: updated_at
+                  type: TIMESTAMP
                   constraints:
                     nullable: false
               - column:
@@ -83,6 +110,12 @@ databaseChangeLog:
                   type: VARCHAR(4000)
                   constraints:
                     nullable: false
+              - column:
+                  name: node_name
+                  type: VARCHAR(255)
+              - column:
+                  name: node_comment
+                  type: VARCHAR(4000)
               - column:
                   name: disabled
                   type: BOOLEAN
@@ -106,10 +139,19 @@ databaseChangeLog:
             columns:
               - column:
                   name: id
-                  type: BIGINT
-                  autoIncrement: true
+                  type: UUID
                   constraints:
                     primaryKey: true
+                    nullable: false
+              - column:
+                  name: created_at
+                  type: TIMESTAMP
+                  constraints:
+                    nullable: false
+              - column:
+                  name: updated_at
+                  type: TIMESTAMP
+                  constraints:
                     nullable: false
               - column:
                   name: disabled
@@ -149,14 +191,13 @@ databaseChangeLog:
             columns:
               - column:
                   name: id
-                  type: BIGINT
-                  autoIncrement: true
+                  type: UUID
                   constraints:
                     primaryKey: true
                     nullable: false
               - column:
                   name: subprocess_id
-                  type: BIGINT
+                  type: UUID
                   constraints:
                     nullable: false
               - column:
@@ -164,10 +205,20 @@ databaseChangeLog:
                   type: INT
               - column:
                   name: configurator_id
-                  type: BIGINT
+                  type: UUID
                   constraints:
                     nullable: false
                     unique: true
+              - column:
+                  name: created_at
+                  type: TIMESTAMP
+                  constraints:
+                    nullable: false
+              - column:
+                  name: updated_at
+                  type: TIMESTAMP
+                  constraints:
+                    nullable: false
               - column:
                   name: stage_bool_id
                   type: BOOLEAN
@@ -187,6 +238,12 @@ databaseChangeLog:
                   type: VARCHAR(4000)
                   constraints:
                     nullable: false
+              - column:
+                  name: node_name
+                  type: VARCHAR(255)
+              - column:
+                  name: node_comment
+                  type: VARCHAR(4000)
         - addForeignKeyConstraint:
             baseTableName: stage
             baseColumnNames: subprocess_id
@@ -205,19 +262,34 @@ databaseChangeLog:
             columns:
               - column:
                   name: id
-                  type: BIGINT
-                  autoIncrement: true
+                  type: UUID
                   constraints:
                     primaryKey: true
                     nullable: false
               - column:
                   name: configurator_id
-                  type: BIGINT
+                  type: UUID
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_at
+                  type: TIMESTAMP
+                  constraints:
+                    nullable: false
+              - column:
+                  name: updated_at
+                  type: TIMESTAMP
                   constraints:
                     nullable: false
               - column:
                   name: result_sort
                   type: INT
+              - column:
+                  name: node_name
+                  type: VARCHAR(255)
+              - column:
+                  name: node_comment
+                  type: VARCHAR(4000)
         - addForeignKeyConstraint:
             baseTableName: result
             baseColumnNames: configurator_id
@@ -230,7 +302,7 @@ databaseChangeLog:
             columns:
               - column:
                   name: result_id
-                  type: BIGINT
+                  type: UUID
                   constraints:
                     nullable: false
               - column:
@@ -259,14 +331,23 @@ databaseChangeLog:
             columns:
               - column:
                   name: id
-                  type: BIGINT
-                  autoIncrement: true
+                  type: UUID
                   constraints:
                     primaryKey: true
                     nullable: false
               - column:
                   name: result_id
-                  type: BIGINT
+                  type: UUID
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_at
+                  type: TIMESTAMP
+                  constraints:
+                    nullable: false
+              - column:
+                  name: updated_at
+                  type: TIMESTAMP
                   constraints:
                     nullable: false
               - column:
@@ -277,6 +358,12 @@ databaseChangeLog:
                   type: VARCHAR(64)
                   constraints:
                     nullable: false
+              - column:
+                  name: node_name
+                  type: VARCHAR(255)
+              - column:
+                  name: node_comment
+                  type: VARCHAR(4000)
         - addForeignKeyConstraint:
             baseTableName: reverse_entry
             baseColumnNames: result_id
@@ -289,14 +376,23 @@ databaseChangeLog:
             columns:
               - column:
                   name: id
-                  type: BIGINT
-                  autoIncrement: true
+                  type: UUID
                   constraints:
                     primaryKey: true
                     nullable: false
               - column:
                   name: reverse_id
-                  type: BIGINT
+                  type: UUID
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_at
+                  type: TIMESTAMP
+                  constraints:
+                    nullable: false
+              - column:
+                  name: updated_at
+                  type: TIMESTAMP
                   constraints:
                     nullable: false
               - column:
@@ -312,6 +408,12 @@ databaseChangeLog:
                   type: VARCHAR(2000)
               - column:
                   name: rule
+                  type: VARCHAR(4000)
+              - column:
+                  name: node_name
+                  type: VARCHAR(255)
+              - column:
+                  name: node_comment
                   type: VARCHAR(4000)
               - column:
                   name: body_event_object_type

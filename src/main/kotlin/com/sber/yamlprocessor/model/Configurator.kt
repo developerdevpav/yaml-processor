@@ -6,9 +6,6 @@ import jakarta.persistence.CascadeType
 import jakarta.persistence.Column
 import jakarta.persistence.Embedded
 import jakarta.persistence.Entity
-import jakarta.persistence.GeneratedValue
-import jakarta.persistence.GenerationType
-import jakarta.persistence.Id
 import jakarta.persistence.OneToMany
 import jakarta.persistence.OneToOne
 import jakarta.persistence.OrderColumn
@@ -17,12 +14,6 @@ import jakarta.persistence.Table
 @Entity
 @Table(name = "configurator")
 class Configurator(
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    @JsonIgnore
-    @Column(name = "id")
-    var dbId: Long? = null,
-
     @OneToOne(mappedBy = "configurator")
     @JsonIgnore
     var stage: Stage? = null,
@@ -46,4 +37,4 @@ class Configurator(
     @OneToMany(mappedBy = "configurator", cascade = [CascadeType.ALL], orphanRemoval = true)
     @OrderColumn(name = "result_sort")
     var result: MutableList<Result> = mutableListOf()
-)
+) : BaseEntity()

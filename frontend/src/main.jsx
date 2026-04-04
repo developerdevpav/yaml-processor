@@ -1,7 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { ApolloClient, ApolloProvider, HttpLink, InMemoryCache } from '@apollo/client';
-import '@patternfly/react-core/dist/styles/base.css';
 import 'reactflow/dist/style.css';
 import './app.css';
 import { App } from './App';

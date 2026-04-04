@@ -3,7 +3,12 @@ package com.sber.yamlprocessor.graphql
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.sber.yamlprocessor.model.ContextCodesDictionary
 import com.sber.yamlprocessor.model.Process
+import com.sber.yamlprocessor.model.Result
+import com.sber.yamlprocessor.model.Reverse
+import com.sber.yamlprocessor.model.ReverseOutput
 import com.sber.yamlprocessor.model.Stage
+import com.sber.yamlprocessor.model.Subprocess
+import com.sber.yamlprocessor.model.Configurator
 import graphql.schema.idl.RuntimeWiring
 import jakarta.persistence.ElementCollection
 import jakarta.persistence.Embeddable
@@ -33,6 +38,7 @@ import java.lang.reflect.Modifier
 import java.nio.charset.StandardCharsets
 import java.util.Collections
 import java.util.IdentityHashMap
+import java.util.UUID
 
 @Configuration
 class JpaGraphQlConfiguration {
@@ -70,7 +76,24 @@ class JpaGraphQlSchemaFactory(
                     "  delete${entity.name}(id: ID!): Boolean!"
                 )
             } + listOf(
+                "  createSubprocessNode(processId: ID!, input: SubprocessInput!): Subprocess!",
+                "  updateSubprocessNode(id: ID!, input: SubprocessInput!): Subprocess!",
+                "  deleteSubprocessNode(id: ID!): Boolean!",
+                "  createStageNode(subprocessId: ID!, input: StageInput!): Stage!",
                 "  updateStageNode(id: ID!, input: StageInput!): Stage!",
+                "  deleteStageNode(id: ID!): Boolean!",
+                "  createConfiguratorNode(stageId: ID!, input: ConfiguratorInput!): Configurator!",
+                "  updateConfiguratorNode(id: ID!, input: ConfiguratorInput!): Configurator!",
+                "  deleteConfiguratorNode(id: ID!): Boolean!",
+                "  createResultNode(configuratorId: ID!, input: ResultInput!): Result!",
+                "  updateResultNode(id: ID!, input: ResultInput!): Result!",
+                "  deleteResultNode(id: ID!): Boolean!",
+                "  createReverseNode(resultId: ID!, input: ReverseInput!): Reverse!",
+                "  updateReverseNode(id: ID!, input: ReverseInput!): Reverse!",
+                "  deleteReverseNode(id: ID!): Boolean!",
+                "  createReverseOutputNode(reverseId: ID!, input: ReverseOutputInput!): ReverseOutput!",
+                "  updateReverseOutputNode(id: ID!, input: ReverseOutputInput!): ReverseOutput!",
+                "  deleteReverseOutputNode(id: ID!): Boolean!",
                 "  updateProcessNode(id: ID!, input: ProcessInput!): Process!"
             )
 
@@ -81,7 +104,7 @@ class JpaGraphQlSchemaFactory(
         val refs = registry.referenceInputs.values.joinToString("\n\n") { ref ->
             buildString {
                 appendLine("input ${ref.name} {")
-                appendLine("  ${ref.idField}: ${graphQlScalar(ref.idType, true)}!")
+                appendLine("  ${ref.idField}: ID!")
                 append("}")
             }
         }
@@ -131,19 +154,14 @@ class JpaGraphQlSchemaFactory(
         append("}")
     }
 
-    private fun graphQlScalar(javaType: Class<*>, id: Boolean = false): String {
-        if (id) {
-            return "ID"
-        }
-        return when (javaType) {
-            java.lang.Boolean::class.java, Boolean::class.javaPrimitiveType -> "Boolean"
-            java.lang.Integer::class.java, Int::class.javaPrimitiveType,
-            java.lang.Short::class.java, Short::class.javaPrimitiveType -> "Int"
-            java.lang.Float::class.java, Float::class.javaPrimitiveType,
-            java.lang.Double::class.java, Double::class.javaPrimitiveType,
-            java.math.BigDecimal::class.java -> "Float"
-            else -> "String"
-        }
+    private fun graphQlScalar(javaType: Class<*>): String = when (javaType) {
+        Boolean::class.java, Boolean::class.javaPrimitiveType -> "Boolean"
+        Int::class.java, Int::class.javaPrimitiveType,
+        Short::class.java, Short::class.javaPrimitiveType -> "Int"
+        Float::class.java, Float::class.javaPrimitiveType,
+        Double::class.java, Double::class.javaPrimitiveType,
+        java.math.BigDecimal::class.java -> "Float"
+        else -> "String"
     }
 }
 
@@ -182,6 +200,68 @@ class JpaGraphQlRuntimeWiringConfigurer(
             type.dataFetcher("updateStageNode") { env ->
                 @Suppress("UNCHECKED_CAST")
                 service.updateStageNode(env.getArgument("id"), env.getArgument<Map<String, Any?>>("input"))
+            }
+            type.dataFetcher("createSubprocessNode") { env ->
+                @Suppress("UNCHECKED_CAST")
+                service.createSubprocessNode(env.getArgument("processId"), env.getArgument<Map<String, Any?>>("input"))
+            }
+            type.dataFetcher("updateSubprocessNode") { env ->
+                @Suppress("UNCHECKED_CAST")
+                service.updateSubprocessNode(env.getArgument("id"), env.getArgument<Map<String, Any?>>("input"))
+            }
+            type.dataFetcher("deleteSubprocessNode") { env ->
+                service.deleteSubprocessNode(env.getArgument("id"))
+            }
+            type.dataFetcher("createStageNode") { env ->
+                @Suppress("UNCHECKED_CAST")
+                service.createStageNode(env.getArgument("subprocessId"), env.getArgument<Map<String, Any?>>("input"))
+            }
+            type.dataFetcher("deleteStageNode") { env ->
+                service.deleteStageNode(env.getArgument("id"))
+            }
+            type.dataFetcher("createConfiguratorNode") { env ->
+                @Suppress("UNCHECKED_CAST")
+                service.createConfiguratorNode(env.getArgument("stageId"), env.getArgument<Map<String, Any?>>("input"))
+            }
+            type.dataFetcher("updateConfiguratorNode") { env ->
+                @Suppress("UNCHECKED_CAST")
+                service.updateConfiguratorNode(env.getArgument("id"), env.getArgument<Map<String, Any?>>("input"))
+            }
+            type.dataFetcher("deleteConfiguratorNode") { env ->
+                service.deleteConfiguratorNode(env.getArgument("id"))
+            }
+            type.dataFetcher("createResultNode") { env ->
+                @Suppress("UNCHECKED_CAST")
+                service.createResultNode(env.getArgument("configuratorId"), env.getArgument<Map<String, Any?>>("input"))
+            }
+            type.dataFetcher("updateResultNode") { env ->
+                @Suppress("UNCHECKED_CAST")
+                service.updateResultNode(env.getArgument("id"), env.getArgument<Map<String, Any?>>("input"))
+            }
+            type.dataFetcher("deleteResultNode") { env ->
+                service.deleteResultNode(env.getArgument("id"))
+            }
+            type.dataFetcher("createReverseNode") { env ->
+                @Suppress("UNCHECKED_CAST")
+                service.createReverseNode(env.getArgument("resultId"), env.getArgument<Map<String, Any?>>("input"))
+            }
+            type.dataFetcher("updateReverseNode") { env ->
+                @Suppress("UNCHECKED_CAST")
+                service.updateReverseNode(env.getArgument("id"), env.getArgument<Map<String, Any?>>("input"))
+            }
+            type.dataFetcher("deleteReverseNode") { env ->
+                service.deleteReverseNode(env.getArgument("id"))
+            }
+            type.dataFetcher("createReverseOutputNode") { env ->
+                @Suppress("UNCHECKED_CAST")
+                service.createReverseOutputNode(env.getArgument("reverseId"), env.getArgument<Map<String, Any?>>("input"))
+            }
+            type.dataFetcher("updateReverseOutputNode") { env ->
+                @Suppress("UNCHECKED_CAST")
+                service.updateReverseOutputNode(env.getArgument("id"), env.getArgument<Map<String, Any?>>("input"))
+            }
+            type.dataFetcher("deleteReverseOutputNode") { env ->
+                service.deleteReverseOutputNode(env.getArgument("id"))
             }
             type.dataFetcher("updateProcessNode") { env ->
                 @Suppress("UNCHECKED_CAST")
@@ -255,6 +335,64 @@ class JpaGraphQlCrudService(
     }
 
     @Transactional
+    fun createSubprocessNode(processId: Any?, input: Map<String, Any?>): Subprocess {
+        val parentId = convertId(processId, UUID::class.java)
+        val process = entityManager.find(Process::class.java, parentId)
+            ?: error("Process with id=$parentId not found")
+        val entity = registry.entity(Subprocess::class.java)
+        val subprocess = objectMapper.convertValue(input, Subprocess::class.java)
+        subprocess.process = process
+        sanitize(subprocess, entity)
+        process.subprocess.add(subprocess)
+        entityManager.persist(subprocess)
+        entityManager.flush()
+        initializeGraph(subprocess, entity)
+        return subprocess
+    }
+
+    @Transactional
+    fun updateSubprocessNode(id: Any?, input: Map<String, Any?>): Subprocess {
+        val entity = registry.entity(Subprocess::class.java)
+        val entityId = convertId(id, entity.idJavaType)
+        val current = entityManager.find(Subprocess::class.java, entityId)
+            ?: error("Subprocess with id=$entityId not found")
+        val incoming = objectMapper.convertValue(input, Subprocess::class.java)
+        setFieldValue(incoming, entity.idField.name, entityId)
+        incoming.process = current.process
+        alignChildIdentifiers(current, incoming, entity)
+        sanitize(incoming, entity)
+        val merged = entityManager.merge(incoming)
+        entityManager.flush()
+        initializeGraph(merged, entity)
+        return merged as Subprocess
+    }
+
+    @Transactional
+    fun deleteSubprocessNode(id: Any?): Boolean {
+        val entityId = convertId(id, UUID::class.java)
+        val subprocess = entityManager.find(Subprocess::class.java, entityId) ?: return false
+        subprocess.process?.subprocess?.removeIf { it.dbId == subprocess.dbId }
+        entityManager.flush()
+        return true
+    }
+
+    @Transactional
+    fun createStageNode(subprocessId: Any?, input: Map<String, Any?>): Stage {
+        val parentId = convertId(subprocessId, UUID::class.java)
+        val subprocess = entityManager.find(Subprocess::class.java, parentId)
+            ?: error("Subprocess with id=$parentId not found")
+        val entity = registry.entity(Stage::class.java)
+        val stage = objectMapper.convertValue(input, Stage::class.java)
+        stage.subprocess = subprocess
+        sanitize(stage, entity)
+        subprocess.stages.add(stage)
+        entityManager.persist(stage)
+        entityManager.flush()
+        initializeGraph(stage, entity)
+        return stage
+    }
+
+    @Transactional
     fun updateProcessNode(id: Any?, input: Map<String, Any?>): Process {
         val entity = registry.entity(Process::class.java)
         val entityId = convertId(id, entity.idJavaType)
@@ -279,6 +417,186 @@ class JpaGraphQlCrudService(
         entityManager.flush()
         initializeGraph(current, entity)
         return current
+    }
+
+    @Transactional
+    fun deleteStageNode(id: Any?): Boolean {
+        val entityId = convertId(id, UUID::class.java)
+        val stage = entityManager.find(Stage::class.java, entityId) ?: return false
+        stage.subprocess?.stages?.removeIf { it.dbId == stage.dbId }
+        entityManager.flush()
+        return true
+    }
+
+    @Transactional
+    fun createConfiguratorNode(stageId: Any?, input: Map<String, Any?>): Configurator {
+        val parentId = convertId(stageId, UUID::class.java)
+        val stage = entityManager.find(Stage::class.java, parentId)
+            ?: error("Stage with id=$parentId not found")
+        require(stage.configurator == null) { "Stage with id=$parentId already has configurator" }
+
+        val entity = registry.entity(Configurator::class.java)
+        val configurator = objectMapper.convertValue(input, Configurator::class.java)
+        configurator.stage = stage
+        sanitize(configurator, entity)
+        entityManager.persist(configurator)
+        stage.configurator = configurator
+        entityManager.flush()
+        initializeGraph(configurator, entity)
+        return configurator
+    }
+
+    @Transactional
+    fun updateConfiguratorNode(id: Any?, input: Map<String, Any?>): Configurator {
+        val entity = registry.entity(Configurator::class.java)
+        val entityId = convertId(id, entity.idJavaType)
+        val current = entityManager.find(Configurator::class.java, entityId)
+            ?: error("Configurator with id=$entityId not found")
+        val incoming = objectMapper.convertValue(input, Configurator::class.java)
+        setFieldValue(incoming, entity.idField.name, entityId)
+        incoming.stage = current.stage
+        alignChildIdentifiers(current, incoming, entity)
+        sanitize(incoming, entity)
+        val merged = entityManager.merge(incoming)
+        entityManager.flush()
+        initializeGraph(merged, entity)
+        return merged as Configurator
+    }
+
+    @Transactional
+    fun deleteConfiguratorNode(id: Any?): Boolean {
+        val entityId = convertId(id, UUID::class.java)
+        val configurator = entityManager.find(Configurator::class.java, entityId) ?: return false
+        configurator.stage?.configurator = null
+        entityManager.remove(configurator)
+        entityManager.flush()
+        return true
+    }
+
+    @Transactional
+    fun createResultNode(configuratorId: Any?, input: Map<String, Any?>): Result {
+        val parentId = convertId(configuratorId, UUID::class.java)
+        val configurator = entityManager.find(Configurator::class.java, parentId)
+            ?: error("Configurator with id=$parentId not found")
+        val entity = registry.entity(Result::class.java)
+        val result = objectMapper.convertValue(input, Result::class.java)
+        result.configurator = configurator
+        sanitize(result, entity)
+        configurator.result.add(result)
+        entityManager.persist(result)
+        entityManager.flush()
+        initializeGraph(result, entity)
+        return result
+    }
+
+    @Transactional
+    fun updateResultNode(id: Any?, input: Map<String, Any?>): Result {
+        val entity = registry.entity(Result::class.java)
+        val entityId = convertId(id, entity.idJavaType)
+        val current = entityManager.find(Result::class.java, entityId)
+            ?: error("Result with id=$entityId not found")
+        val incoming = objectMapper.convertValue(input, Result::class.java)
+        setFieldValue(incoming, entity.idField.name, entityId)
+        incoming.configurator = current.configurator
+        alignChildIdentifiers(current, incoming, entity)
+        sanitize(incoming, entity)
+        val merged = entityManager.merge(incoming)
+        entityManager.flush()
+        initializeGraph(merged, entity)
+        return merged as Result
+    }
+
+    @Transactional
+    fun deleteResultNode(id: Any?): Boolean {
+        val entityId = convertId(id, UUID::class.java)
+        val result = entityManager.find(Result::class.java, entityId) ?: return false
+        result.configurator?.result?.removeIf { it.dbId == result.dbId }
+        entityManager.flush()
+        return true
+    }
+
+    @Transactional
+    fun createReverseNode(resultId: Any?, input: Map<String, Any?>): Reverse {
+        val parentId = convertId(resultId, UUID::class.java)
+        val result = entityManager.find(Result::class.java, parentId)
+            ?: error("Result with id=$parentId not found")
+        val entity = registry.entity(Reverse::class.java)
+        val reverse = objectMapper.convertValue(input, Reverse::class.java)
+        reverse.result = result
+        sanitize(reverse, entity)
+        result.reverse.add(reverse)
+        entityManager.persist(reverse)
+        entityManager.flush()
+        initializeGraph(reverse, entity)
+        return reverse
+    }
+
+    @Transactional
+    fun updateReverseNode(id: Any?, input: Map<String, Any?>): Reverse {
+        val entity = registry.entity(Reverse::class.java)
+        val entityId = convertId(id, entity.idJavaType)
+        val current = entityManager.find(Reverse::class.java, entityId)
+            ?: error("Reverse with id=$entityId not found")
+        val incoming = objectMapper.convertValue(input, Reverse::class.java)
+        setFieldValue(incoming, entity.idField.name, entityId)
+        incoming.result = current.result
+        alignChildIdentifiers(current, incoming, entity)
+        sanitize(incoming, entity)
+        val merged = entityManager.merge(incoming)
+        entityManager.flush()
+        initializeGraph(merged, entity)
+        return merged as Reverse
+    }
+
+    @Transactional
+    fun deleteReverseNode(id: Any?): Boolean {
+        val entityId = convertId(id, UUID::class.java)
+        val reverse = entityManager.find(Reverse::class.java, entityId) ?: return false
+        reverse.result?.reverse?.removeIf { it.dbId == reverse.dbId }
+        entityManager.flush()
+        return true
+    }
+
+    @Transactional
+    fun createReverseOutputNode(reverseId: Any?, input: Map<String, Any?>): ReverseOutput {
+        val parentId = convertId(reverseId, UUID::class.java)
+        val reverse = entityManager.find(Reverse::class.java, parentId)
+            ?: error("Reverse with id=$parentId not found")
+        val entity = registry.entity(ReverseOutput::class.java)
+        val output = objectMapper.convertValue(input, ReverseOutput::class.java)
+        output.reverse = reverse
+        sanitize(output, entity)
+        reverse.output.add(output)
+        entityManager.persist(output)
+        entityManager.flush()
+        initializeGraph(output, entity)
+        return output
+    }
+
+    @Transactional
+    fun updateReverseOutputNode(id: Any?, input: Map<String, Any?>): ReverseOutput {
+        val entity = registry.entity(ReverseOutput::class.java)
+        val entityId = convertId(id, entity.idJavaType)
+        val current = entityManager.find(ReverseOutput::class.java, entityId)
+            ?: error("ReverseOutput with id=$entityId not found")
+        val incoming = objectMapper.convertValue(input, ReverseOutput::class.java)
+        setFieldValue(incoming, entity.idField.name, entityId)
+        incoming.reverse = current.reverse
+        alignChildIdentifiers(current, incoming, entity)
+        sanitize(incoming, entity)
+        val merged = entityManager.merge(incoming)
+        entityManager.flush()
+        initializeGraph(merged, entity)
+        return merged as ReverseOutput
+    }
+
+    @Transactional
+    fun deleteReverseOutputNode(id: Any?): Boolean {
+        val entityId = convertId(id, UUID::class.java)
+        val output = entityManager.find(ReverseOutput::class.java, entityId) ?: return false
+        output.reverse?.output?.removeIf { it.dbId == output.dbId }
+        entityManager.flush()
+        return true
     }
 
     @Transactional
@@ -416,15 +734,19 @@ class JpaGraphQlCrudService(
     private fun convertId(raw: Any?, targetType: Class<*>): Any {
         require(raw != null) { "ID argument is required" }
         return when (targetType) {
-            java.lang.Long::class.java, Long::class.javaPrimitiveType -> when (raw) {
+            UUID::class.java -> when (raw) {
+                is UUID -> raw
+                else -> UUID.fromString(raw.toString())
+            }
+            Long::class.java, Long::class.javaPrimitiveType -> when (raw) {
                 is Number -> raw.toLong()
                 else -> raw.toString().toLong()
             }
-            java.lang.Integer::class.java, Int::class.javaPrimitiveType -> when (raw) {
+            Int::class.java, Int::class.javaPrimitiveType -> when (raw) {
                 is Number -> raw.toInt()
                 else -> raw.toString().toInt()
             }
-            java.lang.Boolean::class.java, Boolean::class.javaPrimitiveType -> when (raw) {
+            Boolean::class.java, Boolean::class.javaPrimitiveType -> when (raw) {
                 is Boolean -> raw
                 else -> raw.toString().toBoolean()
             }
@@ -684,13 +1006,13 @@ class JpaGraphQlRegistry(
             ?.name
 
     private fun graphQlScalar(javaType: Class<*>): String = when (javaType) {
-        java.lang.Boolean::class.java, Boolean::class.javaPrimitiveType -> "Boolean"
-        java.lang.Integer::class.java, Int::class.javaPrimitiveType,
-        java.lang.Short::class.java, Short::class.javaPrimitiveType -> "Int"
-        java.lang.Float::class.java, Float::class.javaPrimitiveType,
-        java.lang.Double::class.java, Double::class.javaPrimitiveType,
+        Boolean::class.java, Boolean::class.javaPrimitiveType -> "Boolean"
+        Int::class.java, Int::class.javaPrimitiveType,
+        Short::class.java, Short::class.javaPrimitiveType -> "Int"
+        Float::class.java, Float::class.javaPrimitiveType,
+        Double::class.java, Double::class.javaPrimitiveType,
         java.math.BigDecimal::class.java -> "Float"
-        java.lang.Long::class.java, Long::class.javaPrimitiveType -> "String"
+        Long::class.java, Long::class.javaPrimitiveType -> "String"
         else -> "String"
     }
 

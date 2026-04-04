@@ -7,9 +7,6 @@ import jakarta.persistence.Column
 import jakarta.persistence.Embedded
 import jakarta.persistence.Entity
 import jakarta.persistence.FetchType
-import jakarta.persistence.GeneratedValue
-import jakarta.persistence.GenerationType
-import jakarta.persistence.Id
 import jakarta.persistence.JoinColumn
 import jakarta.persistence.ManyToOne
 import jakarta.persistence.OneToOne
@@ -18,12 +15,6 @@ import jakarta.persistence.Table
 @Entity
 @Table(name = "stage")
 class Stage(
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    @JsonIgnore
-    @Column(name = "id")
-    var dbId: Long? = null,
-
     @ManyToOne(optional = false)
     @JoinColumn(name = "subprocess_id")
     @JsonIgnore
@@ -46,7 +37,13 @@ class Stage(
     @Column(name = "description", nullable = false, length = 4000)
     var description: String = "",
 
+    @Column(name = "node_name", length = 255)
+    var nodeName: String? = null,
+
+    @Column(name = "node_comment", length = 4000)
+    var nodeComment: String? = null,
+
     @OneToOne(cascade = [CascadeType.ALL], orphanRemoval = true)
     @JoinColumn(name = "configurator_id")
     var configurator: Configurator? = null
-)
+) : BaseEntity()

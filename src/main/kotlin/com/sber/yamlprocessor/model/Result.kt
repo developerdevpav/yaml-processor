@@ -8,9 +8,6 @@ import jakarta.persistence.Column
 import jakarta.persistence.ElementCollection
 import jakarta.persistence.Entity
 import jakarta.persistence.FetchType
-import jakarta.persistence.GeneratedValue
-import jakarta.persistence.GenerationType
-import jakarta.persistence.Id
 import jakarta.persistence.JoinColumn
 import jakarta.persistence.ManyToOne
 import jakarta.persistence.OneToMany
@@ -20,12 +17,6 @@ import jakarta.persistence.Table
 @Entity
 @Table(name = "result")
 class Result(
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    @JsonIgnore
-    @Column(name = "id")
-    var dbId: Long? = null,
-
     @ManyToOne(optional = false)
     @JoinColumn(name = "configurator_id")
     @JsonIgnore
@@ -38,7 +29,13 @@ class Result(
     @JsonProperty("input-scenarios")
     var inputScenarios: MutableList<String> = mutableListOf(),
 
+    @Column(name = "node_name", length = 255)
+    var nodeName: String? = null,
+
+    @Column(name = "node_comment", length = 4000)
+    var nodeComment: String? = null,
+
     @OneToMany(mappedBy = "result", cascade = [CascadeType.ALL], orphanRemoval = true)
     @OrderColumn(name = "reverse_sort")
     var reverse: MutableList<Reverse> = mutableListOf()
-)
+) : BaseEntity()
