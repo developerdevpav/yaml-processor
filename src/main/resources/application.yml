@@ -7,14 +7,6 @@ spring:
     property-naming-strategy: SNAKE_CASE
     default-property-inclusion: NON_NULL
   
-  # Настройки Thymeleaf
-  thymeleaf:
-    prefix: classpath:/templates/
-    suffix: .html
-    mode: HTML
-    encoding: UTF-8
-    cache: false
-
   datasource:
     # Файловая БД: ./data/yaml_processor.mv.db относительно рабочей директории процесса
     url: jdbc:h2:file:./data/yaml_processor;MODE=PostgreSQL;AUTO_SERVER=TRUE
@@ -26,6 +18,7 @@ spring:
     change-log: classpath:/db/changelog/db.changelog-master.yaml
 
   jpa:
+    open-in-view: false
     hibernate:
       ddl-auto: validate
     properties:
@@ -34,6 +27,10 @@ spring:
 
   h2:
     console:
+      enabled: true
+
+  graphql:
+    graphiql:
       enabled: true
 
 # Настройки приложения
@@ -47,3 +44,12 @@ server:
   port: 8080
   servlet:
     context-path: /
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when_authorized

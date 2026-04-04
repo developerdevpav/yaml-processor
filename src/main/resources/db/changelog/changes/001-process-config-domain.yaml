@@ -1,0 +1,350 @@
+databaseChangeLog:
+  - changeSet:
+      id: 001-process-config-domain
+      author: Talaika Pavel
+      changes:
+        - createTable:
+            tableName: process_config
+            columns:
+              - column:
+                  name: id
+                  type: BIGINT
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+
+        - createTable:
+            tableName: process
+            columns:
+              - column:
+                  name: id
+                  type: BIGINT
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: process_config_id
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+                    unique: true
+              - column:
+                  name: business_id
+                  type: VARCHAR(255)
+              - column:
+                  name: context_code
+                  type: VARCHAR(64)
+              - column:
+                  name: disabled
+                  type: BOOLEAN
+                  defaultValueBoolean: false
+                  constraints:
+                    nullable: false
+              - column:
+                  name: description
+                  type: VARCHAR(4000)
+                  constraints:
+                    nullable: false
+        - addForeignKeyConstraint:
+            baseTableName: process
+            baseColumnNames: process_config_id
+            constraintName: fk_process_process_config
+            referencedTableName: process_config
+            referencedColumnNames: id
+
+        - createTable:
+            tableName: subprocess
+            columns:
+              - column:
+                  name: id
+                  type: BIGINT
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: process_id
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: subprocess_sort
+                  type: INT
+              - column:
+                  name: business_id
+                  type: VARCHAR(255)
+              - column:
+                  name: context_code
+                  type: VARCHAR(64)
+              - column:
+                  name: description
+                  type: VARCHAR(4000)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: disabled
+                  type: BOOLEAN
+                  defaultValueBoolean: false
+                  constraints:
+                    nullable: false
+              - column:
+                  name: trigger_rule
+                  type: VARCHAR(4000)
+                  constraints:
+                    nullable: false
+        - addForeignKeyConstraint:
+            baseTableName: subprocess
+            baseColumnNames: process_id
+            constraintName: fk_subprocess_process
+            referencedTableName: process
+            referencedColumnNames: id
+
+        - createTable:
+            tableName: configurator
+            columns:
+              - column:
+                  name: id
+                  type: BIGINT
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: disabled
+                  type: BOOLEAN
+                  defaultValueBoolean: false
+                  constraints:
+                    nullable: false
+              - column:
+                  name: interrupted
+                  type: BOOLEAN
+                  defaultValueBoolean: true
+                  constraints:
+                    nullable: false
+              - column:
+                  name: multiple
+                  type: BOOLEAN
+                  defaultValueBoolean: false
+                  constraints:
+                    nullable: false
+              - column:
+                  name: audit_enabled
+                  type: BOOLEAN
+              - column:
+                  name: audit_event_code
+                  type: VARCHAR(500)
+              - column:
+                  name: audit_event_description
+                  type: VARCHAR(4000)
+              - column:
+                  name: filter_event_rule
+                  type: VARCHAR(4000)
+                  constraints:
+                    nullable: false
+
+        - createTable:
+            tableName: stage
+            columns:
+              - column:
+                  name: id
+                  type: BIGINT
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: subprocess_id
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: stage_sort
+                  type: INT
+              - column:
+                  name: configurator_id
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+                    unique: true
+              - column:
+                  name: stage_bool_id
+                  type: BOOLEAN
+              - column:
+                  name: executor
+                  type: VARCHAR(500)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: stage_log_journal_service_name
+                  type: VARCHAR(500)
+              - column:
+                  name: context_code
+                  type: VARCHAR(64)
+              - column:
+                  name: description
+                  type: VARCHAR(4000)
+                  constraints:
+                    nullable: false
+        - addForeignKeyConstraint:
+            baseTableName: stage
+            baseColumnNames: subprocess_id
+            constraintName: fk_stage_subprocess
+            referencedTableName: subprocess
+            referencedColumnNames: id
+        - addForeignKeyConstraint:
+            baseTableName: stage
+            baseColumnNames: configurator_id
+            constraintName: fk_stage_configurator
+            referencedTableName: configurator
+            referencedColumnNames: id
+
+        - createTable:
+            tableName: result
+            columns:
+              - column:
+                  name: id
+                  type: BIGINT
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: configurator_id
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: result_sort
+                  type: INT
+        - addForeignKeyConstraint:
+            baseTableName: result
+            baseColumnNames: configurator_id
+            constraintName: fk_result_configurator
+            referencedTableName: configurator
+            referencedColumnNames: id
+
+        - createTable:
+            tableName: result_input_scenario
+            columns:
+              - column:
+                  name: result_id
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: scenario_sort
+                  type: INT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: scenario
+                  type: VARCHAR(2000)
+                  constraints:
+                    nullable: false
+        - addPrimaryKey:
+            tableName: result_input_scenario
+            columnNames: result_id, scenario_sort
+            constraintName: pk_result_input_scenario
+        - addForeignKeyConstraint:
+            baseTableName: result_input_scenario
+            baseColumnNames: result_id
+            constraintName: fk_result_input_scenario_result
+            referencedTableName: result
+            referencedColumnNames: id
+
+        - createTable:
+            tableName: reverse_entry
+            columns:
+              - column:
+                  name: id
+                  type: BIGINT
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: result_id
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: reverse_sort
+                  type: INT
+              - column:
+                  name: b3_status
+                  type: VARCHAR(64)
+                  constraints:
+                    nullable: false
+        - addForeignKeyConstraint:
+            baseTableName: reverse_entry
+            baseColumnNames: result_id
+            constraintName: fk_reverse_result
+            referencedTableName: result
+            referencedColumnNames: id
+
+        - createTable:
+            tableName: reverse_output
+            columns:
+              - column:
+                  name: id
+                  type: BIGINT
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: reverse_id
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: output_sort
+                  type: INT
+              - column:
+                  name: phase
+                  type: VARCHAR(64)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: name
+                  type: VARCHAR(2000)
+              - column:
+                  name: rule
+                  type: VARCHAR(4000)
+              - column:
+                  name: body_event_object_type
+                  type: VARCHAR(500)
+              - column:
+                  name: body_service_scenario
+                  type: VARCHAR(500)
+              - column:
+                  name: body_service_status
+                  type: VARCHAR(500)
+              - column:
+                  name: body_service_sla_status
+                  type: VARCHAR(64)
+              - column:
+                  name: body_service_sla_duration_value
+                  type: INT
+              - column:
+                  name: body_service_sla_duration_unit
+                  type: VARCHAR(64)
+              - column:
+                  name: body_type
+                  type: VARCHAR(500)
+              - column:
+                  name: rev_out_journal_service_name
+                  type: VARCHAR(500)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: rev_out_message
+                  type: VARCHAR(4000)
+        - addForeignKeyConstraint:
+            baseTableName: reverse_output
+            baseColumnNames: reverse_id
+            constraintName: fk_reverse_output_reverse
+            referencedTableName: reverse_entry
+            referencedColumnNames: id

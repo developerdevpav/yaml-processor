@@ -1,0 +1,7 @@
+databaseChangeLog:
+  - include:
+      relativeToChangelogFile: true
+      file: changes/001-process-config-domain.yaml
+  - include:
+      relativeToChangelogFile: true
+      file: changes/002-dictionary-tables.yaml
