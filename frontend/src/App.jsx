@@ -655,21 +655,26 @@ function NodeEditor({ processConfig, selectedNodeId, onSave, onAddSubprocess, on
   const [draft, setDraft] = useState({});
   const [stageOrder, setStageOrder] = useState([]);
   const [draggedStageId, setDraggedStageId] = useState(null);
+  const stageOrderRef = useRef([]);
+  const selectedNodeSnapshot = selected?.node ? JSON.stringify(selected.node) : '';
   const selectedSubprocessStageIds =
     selected?.kind === 'subprocess' ? (selected.node?.stages ?? []).map((stage) => String(stage.dbId)).join('|') : '';
 
   useEffect(() => {
     setDraft(selected?.node ?? {});
-  }, [selectedNodeId, processConfig]);
+  }, [selectedNodeId, selectedNodeSnapshot]);
 
   useEffect(() => {
     if (selected?.kind !== 'subprocess') {
       setStageOrder([]);
+      stageOrderRef.current = [];
       setDraggedStageId(null);
       return;
     }
 
-    setStageOrder((selected.node?.stages ?? []).map((stage) => String(stage.dbId)));
+    const nextStageOrder = (selected.node?.stages ?? []).map((stage) => String(stage.dbId));
+    setStageOrder(nextStageOrder);
+    stageOrderRef.current = nextStageOrder;
     setDraggedStageId(null);
   }, [selectedNodeId, selected?.kind, selectedSubprocessStageIds]);
 
@@ -694,17 +699,20 @@ function NodeEditor({ processConfig, selectedNodeId, onSave, onAddSubprocess, on
       return;
     }
 
-    const fromIndex = stageOrder.indexOf(draggedStageId);
-    const toIndex = stageOrder.indexOf(targetStageId);
-    if (fromIndex < 0 || toIndex < 0) {
+    const currentOrder = stageOrderRef.current;
+    const fromIndex = currentOrder.indexOf(draggedStageId);
+    const toIndex = currentOrder.indexOf(targetStageId);
+    if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) {
       return;
     }
 
-    setStageOrder((current) => reorderItems(current, fromIndex, toIndex));
+    const nextOrder = reorderItems(currentOrder, fromIndex, toIndex);
+    stageOrderRef.current = nextOrder;
+    setStageOrder(nextOrder);
   };
 
   const handlePointerUp = async () => {
-    const nextStageOrder = [...stageOrder];
+    const nextStageOrder = [...stageOrderRef.current];
     setDraggedStageId(null);
 
     if (selected.kind !== 'subprocess' || !selected.node?.dbId) {
@@ -843,12 +851,29 @@ export function App() {
   const [updateErrorMessage, setUpdateErrorMessage] = useState('');
   const [isTopologyFullscreen, setIsTopologyFullscreen] = useState(false);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
+  const [localProcessConfig, setLocalProcessConfig] = useState(null);
   const topologyContainerRef = useRef(null);
 
   const processConfigs = data?.processConfigList ?? [];
+  const isInitialLoading = loading && processConfigs.length === 0;
   const processCodeOptions = (data?.contextCodesDictionaryList ?? []).map((item) => item.code).filter(Boolean);
-  const activeProcessConfig =
+  const serverActiveProcessConfig =
     processConfigs.find((item) => item.dbId === selectedConfigId) ?? processConfigs[0] ?? null;
+  const activeProcessConfig =
+    localProcessConfig?.dbId && localProcessConfig.dbId === serverActiveProcessConfig?.dbId
+      ? localProcessConfig
+      : serverActiveProcessConfig;
+
+  useEffect(() => {
+    if (!serverActiveProcessConfig) {
+      setLocalProcessConfig(null);
+      return;
+    }
+
+    setLocalProcessConfig((current) =>
+      current?.dbId === serverActiveProcessConfig.dbId ? serverActiveProcessConfig : current
+    );
+  }, [serverActiveProcessConfig]);
 
   useEffect(() => {
     if (activeProcessConfig && activeProcessConfig.dbId !== selectedConfigId) {
@@ -905,14 +930,16 @@ export function App() {
   const saveProcessConfig = async (nextConfig) => {
     try {
       setUpdateErrorMessage('');
+      setLocalProcessConfig(nextConfig);
       await updateProcess({
         variables: {
           id: nextConfig.dbId,
           input: serializeProcessConfig(nextConfig),
         },
       });
-      await refetch();
+      refetch();
     } catch (mutationError) {
+      setLocalProcessConfig(serverActiveProcessConfig);
       setUpdateErrorMessage(getErrorMessage(mutationError, 'Не удалось сохранить изменения процесса.'));
     }
   };
@@ -1171,13 +1198,13 @@ export function App() {
                   </Button>
                 </div>
                 <CardBody className="canvas-card-body">
-                  {loading && (
+                  {isInitialLoading && (
                     <div className="loading-state">
                       <Spinner size="xl" />
                     </div>
                   )}
 
-                  {error && (
+                  {error && !isInitialLoading && (
                     <EmptyState>
                       <Title headingLevel="h4">GraphQL недоступен</Title>
                       <EmptyStateBody>{error.message}</EmptyStateBody>
@@ -1187,14 +1214,14 @@ export function App() {
                     </EmptyState>
                   )}
 
-                  {!loading && !error && !activeProcessConfig && (
+                  {!isInitialLoading && !error && !activeProcessConfig && (
                     <EmptyState>
                       <Title headingLevel="h4">Процессов пока нет</Title>
                       <EmptyStateBody>Создайте первый процесс слева, затем соберите дерево из subprocess и stage.</EmptyStateBody>
                     </EmptyState>
                   )}
 
-                  {!loading && !error && activeProcessConfig && (
+                  {!isInitialLoading && !error && activeProcessConfig && (
                     <ProcessTopology
                       processConfig={activeProcessConfig}
                       selectedNodeId={selectedNodeId}
