@@ -113,6 +113,23 @@ function Alert({ title, className = '', variant = 'danger' }) {
   return <div className={cn('rounded-2xl border px-4 py-3 text-sm', variantClassName, className)}>{title}</div>;
 }
 
+function Toast({ title, message, onClose }) {
+  return (
+    <div className="app-toast" role="status" aria-live="polite">
+      <div className="app-toast__icon">
+        <CheckVerified02 aria-hidden size={18} />
+      </div>
+      <div className="app-toast__content">
+        <div className="app-toast__title">{title}</div>
+        {message && <div className="app-toast__message">{message}</div>}
+      </div>
+      <button type="button" className="app-toast__close" onClick={onClose} aria-label="Закрыть уведомление">
+        <XClose aria-hidden size={16} />
+      </button>
+    </div>
+  );
+}
+
 function EmptyState({ children }) {
   return <div className="flex h-full min-h-[24rem] items-center justify-center">{children}</div>;
 }
@@ -318,7 +335,6 @@ const PROCESS_FIELDS = gql`
     id
     nodeName
     nodeComment
-    description
     disabled
     contextCode {
       code
@@ -347,7 +363,6 @@ const PROCESS_FIELDS = gql`
         id
         nodeName
         nodeComment
-        description
         disabled
         contextCode {
           code
@@ -368,14 +383,14 @@ const CREATE_PROCESS = gql`
         id
         nodeName
         nodeComment
-        description
         disabled
         contextCode {
           code
         }
         subprocess {
           id
-          description
+          nodeName
+          nodeComment
           disabled
           contextCode {
             code
@@ -422,7 +437,6 @@ const UPDATE_PROCESS_NODE = gql`
       id
       nodeName
       nodeComment
-      description
       contextCode {
         code
       }
@@ -598,7 +612,6 @@ function getDefaultExpandedNodeIds(processConfig) {
 
 function createDefaultSubprocess(index) {
   return {
-    description: '',
     nodeName: `subprocess_${index}`,
     nodeComment: 'добавьте комментарий',
     disabled: false,
@@ -649,7 +662,6 @@ function getNextProcessDraft(processConfigs, processCodeOptions) {
 
   return {
     process: {
-      description: '',
       disabled: false,
       contextCode: availableCode ? { code: availableCode } : null,
       subprocess: [],
@@ -790,7 +802,6 @@ function serializeReverseOutput(output) {
 function serializeSubprocess(subprocess) {
   return {
     id: subprocess.id ?? undefined,
-    description: subprocess.description ?? '',
     nodeName: subprocess.nodeName ?? '',
     nodeComment: subprocess.nodeComment ?? '',
     disabled: subprocess.disabled ?? false,
@@ -811,7 +822,6 @@ function serializeProcessConfig(processConfig) {
     process: processConfig.process
       ? {
           id: processConfig.process.id ?? undefined,
-          description: processConfig.process.description ?? '',
           nodeName: processConfig.process.nodeName ?? '',
           nodeComment: processConfig.process.nodeComment ?? '',
           disabled: processConfig.process.disabled ?? false,
@@ -826,7 +836,7 @@ const TOPOLOGY_NODE_WIDTH = 300;
 const TOPOLOGY_NODE_HEIGHT = 136;
 const TOPOLOGY_VERTICAL_GAP = 56;
 const TOPOLOGY_HORIZONTAL_GAP = 128;
-const REVERSE_OUTPUT_AUTOSAVE_DELAY_MS = 10_000;
+const NODE_AUTOSAVE_DELAY_MS = 5_000;
 const TOPOLOGY_TOP_PADDING = 32;
 const TOPOLOGY_LEFT_PADDING = 48;
 const TOPOLOGY_TITLE_CHARS_PER_LINE = 20;
@@ -1003,7 +1013,7 @@ function getSubprocessLayout(subprocess, expandedSet) {
   const stageLayouts = expanded ? (subprocess.stages ?? []).map((stage) => getStageLayout(stage, expandedSet)) : [];
   const nodeHeight = estimateNodeHeight({
     title: subprocess.nodeName || 'subprocess',
-    subtitle: subprocess.description || 'Подпроцесс',
+    subtitle: subprocess.nodeComment || 'Подпроцесс',
     isExpandable: (subprocess.stages?.length ?? 0) > 0,
   });
 
@@ -1045,7 +1055,7 @@ function buildTopologyModel(processConfig, expandedNodeIds = []) {
   const subprocessLayouts = processExpanded ? (processConfig.process.subprocess ?? []).map((subprocess) => getSubprocessLayout(subprocess, expandedSet)) : [];
   const processHeight = estimateNodeHeight({
     title: processConfig.process.nodeName || processConfig.process.contextCode?.code || 'process',
-    subtitle: processConfig.process.nodeComment || processConfig.process.description || 'Корневой процесс',
+    subtitle: processConfig.process.nodeComment || 'Корневой процесс',
     isExpandable: (processConfig.process.subprocess?.length ?? 0) > 0,
   });
   const processBranchHeight = Math.max(processHeight, stackBranchHeight(subprocessLayouts));
@@ -1055,7 +1065,7 @@ function buildTopologyModel(processConfig, expandedNodeIds = []) {
   placeTopologyNode(nodes, processNodeId, processX, TOPOLOGY_TOP_PADDING, processHeight, processBranchHeight, {
     title: processConfig.process.nodeName || processConfig.process.contextCode?.code || 'process',
     kind: 'process',
-    secondaryLabel: processConfig.process.nodeComment || processConfig.process.description || 'Корневой процесс',
+    secondaryLabel: processConfig.process.nodeComment || 'Корневой процесс',
     isExpandable: (processConfig.process.subprocess?.length ?? 0) > 0,
     isExpanded: expandedSet.has(processNodeId),
   });
@@ -1077,7 +1087,7 @@ function buildTopologyModel(processConfig, expandedNodeIds = []) {
       {
         title: subprocessLayout.subprocess.nodeName || 'subprocess',
         kind: 'subprocess',
-        secondaryLabel: subprocessLayout.subprocess.nodeComment || subprocessLayout.subprocess.description || 'добавьте комментарий',
+        secondaryLabel: subprocessLayout.subprocess.nodeComment || 'добавьте комментарий',
         isExpandable: (subprocessLayout.subprocess.stages?.length ?? 0) > 0,
         isExpanded: subprocessLayout.expanded,
       },
@@ -1404,6 +1414,60 @@ function findSelectedNode(processConfig, selectedNodeId) {
   return null;
 }
 
+function getNodeSavePayload(kind, draft, subprocessTriggerText = '') {
+  if (!kind) {
+    return null;
+  }
+
+  if (kind === 'process') {
+    return {
+      nodeName: draft.nodeName ?? '',
+      nodeComment: draft.nodeComment ?? '',
+      disabled: draft.disabled ?? false,
+      contextCode: normalizeReferenceDraft(draft.contextCode),
+    };
+  }
+
+  if (kind === 'subprocess') {
+    const rawTrigger = subprocessTriggerText.trim();
+    return {
+      nodeName: draft.nodeName ?? '',
+      nodeComment: draft.nodeComment ?? '',
+      disabled: draft.disabled ?? false,
+      contextCode: normalizeReferenceDraft(draft.contextCode),
+      trigger: {
+        ...(draft.trigger ?? {}),
+        rule: JSON.stringify(rawTrigger ? JSON.parse(rawTrigger) : {}, null, 2),
+      },
+    };
+  }
+
+  if (kind === 'stage') {
+    return {
+      executor: draft.executor ?? '',
+      nodeName: draft.nodeName ?? '',
+      nodeComment: draft.nodeComment ?? '',
+      contextCode: normalizeReferenceDraft(draft.contextCode),
+      log: draft.log ?? { journalServiceName: '' },
+      configurator: draft.configurator ?? null,
+    };
+  }
+
+  if (kind === 'configurator') {
+    return {
+      disabled: draft.disabled ?? false,
+      interrupted: draft.interrupted ?? true,
+      multiple: draft.multiple ?? false,
+      filterEventRule: draft.filterEventRule ?? '',
+      audit: draft.audit ?? null,
+      result: draft.result ?? [],
+      description: draft.description ?? '',
+    };
+  }
+
+  return draft;
+}
+
 function ProcessNode({ data, selected }) {
   const title = data?.title ?? 'node';
   const subtitle = data?.secondaryLabel ?? '';
@@ -1607,7 +1671,8 @@ function NodeEditor({
   const [subprocessTriggerStatus, setSubprocessTriggerStatus] = useState('valid');
   const draftRef = useRef({});
   const stageOrderRef = useRef([]);
-  const reverseOutputAutosaveTimeoutRef = useRef(null);
+  const autosaveTimeoutRef = useRef(null);
+  const lastSavedPayloadRef = useRef('');
   const selectedNodeSnapshot = selected?.node ? JSON.stringify(selected.node) : '';
   const selectedSubprocessStageIds =
     selected?.kind === 'subprocess' ? (selected.node?.stages ?? []).map((stage) => String(stage.id)).join('|') : '';
@@ -1615,20 +1680,26 @@ function NodeEditor({
   useEffect(() => {
     setDraft(selected?.node ?? {});
     draftRef.current = selected?.node ?? {};
+    try {
+      const payload = getNodeSavePayload(selected?.kind, selected?.node ?? {}, selected?.node?.trigger?.rule ?? '');
+      lastSavedPayloadRef.current = payload ? JSON.stringify(payload) : '';
+    } catch {
+      lastSavedPayloadRef.current = '';
+    }
   }, [selectedNodeId, selectedNodeSnapshot]);
 
   useEffect(() => {
     setBulkResultInput('');
-    if (reverseOutputAutosaveTimeoutRef.current) {
-      clearTimeout(reverseOutputAutosaveTimeoutRef.current);
-      reverseOutputAutosaveTimeoutRef.current = null;
+    if (autosaveTimeoutRef.current) {
+      clearTimeout(autosaveTimeoutRef.current);
+      autosaveTimeoutRef.current = null;
     }
   }, [selectedNodeId]);
 
   useEffect(() => {
     return () => {
-      if (reverseOutputAutosaveTimeoutRef.current) {
-        clearTimeout(reverseOutputAutosaveTimeoutRef.current);
+      if (autosaveTimeoutRef.current) {
+        clearTimeout(autosaveTimeoutRef.current);
       }
     };
   }, []);
@@ -1675,6 +1746,41 @@ function NodeEditor({
     }
   }, [selected?.kind, subprocessTriggerText]);
 
+  useEffect(() => {
+    if (!selected) {
+      return undefined;
+    }
+
+    let nextPayload;
+    try {
+      nextPayload = getNodeSavePayload(selected.kind, draft, subprocessTriggerText);
+    } catch {
+      return undefined;
+    }
+
+    const nextPayloadSnapshot = JSON.stringify(nextPayload);
+    if (nextPayloadSnapshot === lastSavedPayloadRef.current) {
+      return undefined;
+    }
+
+    if (autosaveTimeoutRef.current) {
+      clearTimeout(autosaveTimeoutRef.current);
+    }
+
+    autosaveTimeoutRef.current = window.setTimeout(() => {
+      autosaveTimeoutRef.current = null;
+      lastSavedPayloadRef.current = nextPayloadSnapshot;
+      onSave(nextPayload);
+    }, NODE_AUTOSAVE_DELAY_MS);
+
+    return () => {
+      if (autosaveTimeoutRef.current) {
+        clearTimeout(autosaveTimeoutRef.current);
+        autosaveTimeoutRef.current = null;
+      }
+    };
+  }, [draft, onSave, selected, subprocessTriggerText]);
+
   const handleFormatSubprocessTrigger = () => {
     try {
       const rawTrigger = subprocessTriggerText.trim();
@@ -1692,68 +1798,6 @@ function NodeEditor({
     return null;
   }
 
-  const save = () => {
-    if (selected.kind === 'process') {
-      onSave({
-        description: draft.description ?? '',
-        nodeName: draft.nodeName ?? '',
-        nodeComment: draft.nodeComment ?? '',
-        disabled: draft.disabled ?? false,
-        contextCode: normalizeReferenceDraft(draft.contextCode),
-      });
-      return;
-    }
-
-    if (selected.kind === 'subprocess') {
-      try {
-        const rawTrigger = subprocessTriggerText.trim();
-        const parsedTrigger = rawTrigger ? JSON.parse(rawTrigger) : {};
-        setSubprocessTriggerError('');
-
-        onSave({
-          description: draft.description ?? '',
-          nodeName: draft.nodeName ?? '',
-          nodeComment: draft.nodeComment ?? '',
-          disabled: draft.disabled ?? false,
-          contextCode: normalizeReferenceDraft(draft.contextCode),
-          trigger: {
-            ...(draft.trigger ?? {}),
-            rule: JSON.stringify(parsedTrigger, null, 2),
-          },
-        });
-      } catch {
-        setSubprocessTriggerError('Trigger rule должен быть валидным JSON.');
-      }
-      return;
-    }
-
-    if (selected.kind === 'stage') {
-      onSave({
-        executor: draft.executor ?? '',
-        nodeName: draft.nodeName ?? '',
-        nodeComment: draft.nodeComment ?? '',
-        contextCode: normalizeReferenceDraft(draft.contextCode),
-        log: draft.log ?? { journalServiceName: '' },
-        configurator: draft.configurator ?? null,
-      });
-      return;
-    }
-
-    if (selected.kind === 'configurator') {
-      onSave({
-        disabled: draft.disabled ?? false,
-        interrupted: draft.interrupted ?? true,
-        multiple: draft.multiple ?? false,
-        filterEventRule: draft.filterEventRule ?? '',
-        audit: draft.audit ?? null,
-        result: draft.result ?? [],
-        description: draft.description ?? '',
-      });
-      return;
-    }
-
-    onSave(draft);
-  };
   const orderedStages =
     selected.kind === 'subprocess'
       ? stageOrder
@@ -1801,32 +1845,10 @@ function NodeEditor({
     setDraft((current) => updateNestedValue(current, path, value));
   };
 
-  const scheduleReverseOutputSave = (nextDraft, delayMs = 0) => {
-    if (selected.kind !== 'reverseOutput') {
-      return;
-    }
-
-    if (reverseOutputAutosaveTimeoutRef.current) {
-      clearTimeout(reverseOutputAutosaveTimeoutRef.current);
-      reverseOutputAutosaveTimeoutRef.current = null;
-    }
-
-    if (delayMs > 0) {
-      reverseOutputAutosaveTimeoutRef.current = window.setTimeout(() => {
-        reverseOutputAutosaveTimeoutRef.current = null;
-        onSave(nextDraft);
-      }, delayMs);
-      return;
-    }
-
-    onSave(nextDraft);
-  };
-
-  const updateReverseOutputDraft = (updater, delayMs = 0) => {
+  const updateReverseOutputDraft = (updater) => {
     const nextDraft = updater(draftRef.current);
     draftRef.current = nextDraft;
     setDraft(nextDraft);
-    scheduleReverseOutputSave(nextDraft, delayMs);
   };
 
   const updateDraftArrayItem = (path, index, updater) => {
@@ -1896,7 +1918,9 @@ function NodeEditor({
   });
 
   const editorTitle =
-    selected.kind === 'subprocess'
+    selected.kind === 'process'
+      ? `Процесс ${selected.node?.nodeName ?? ''}`.trim()
+      : selected.kind === 'subprocess'
       ? `Подпроцесс ${selected.node?.nodeName ?? ''}`.trim()
       : `Свойства: ${selected.kind}`;
 
@@ -1910,7 +1934,13 @@ function NodeEditor({
               {(selected.kind === 'process' || selected.kind === 'subprocess') && (
                 <>
                   <FormGroup
-                    label={selected.kind === 'subprocess' ? 'Название подпроцесса' : 'Node name'}
+                    label={
+                      selected.kind === 'process'
+                        ? 'Название процесса'
+                        : selected.kind === 'subprocess'
+                          ? 'Название подпроцесса'
+                          : 'Node name'
+                    }
                     fieldId="process-node-name"
                   >
                     <TextInput
@@ -1918,12 +1948,21 @@ function NodeEditor({
                       value={draft.nodeName ?? ''}
                       onChange={(_, value) => setDraft((current) => ({ ...current, nodeName: value }))}
                     />
+                    {selected.kind === 'process' && (
+                      <Text component="small">Название процесса необходимо для визуальной идентификации</Text>
+                    )}
                     {selected.kind === 'subprocess' && (
                       <Text component="small">Название подпроцесса необходимо для визуальной идентификации</Text>
                     )}
                   </FormGroup>
                   <FormGroup
-                    label={selected.kind === 'subprocess' ? 'Описание подпроцесса' : 'Node comment'}
+                    label={
+                      selected.kind === 'process'
+                        ? 'Описание процесса'
+                        : selected.kind === 'subprocess'
+                          ? 'Описание подпроцесса'
+                          : 'Node comment'
+                    }
                     fieldId="process-node-comment"
                   >
                     <TextArea
@@ -1932,6 +1971,9 @@ function NodeEditor({
                       onChange={(_, value) => setDraft((current) => ({ ...current, nodeComment: value }))}
                       resizeOrientation="vertical"
                     />
+                    {selected.kind === 'process' && (
+                      <Text component="small">Описание процесса необходимо для описания назначения процесса</Text>
+                    )}
                     {selected.kind === 'subprocess' && (
                       <Text component="small">Название подпроцесса необходимо для описания назначения подпроцесса</Text>
                     )}
@@ -1939,7 +1981,7 @@ function NodeEditor({
                 </>
               )}
               <FormGroup
-                label={selected.kind === 'subprocess' ? 'Код процесса' : 'Context code'}
+                label={selected.kind === 'process' || selected.kind === 'subprocess' ? 'Код процесса' : 'Context code'}
                 fieldId="node-context-code"
               >
                 <ProcessSelectField
@@ -1949,7 +1991,7 @@ function NodeEditor({
                   options={contextCodeOptions}
                   placeholder="Выберите context code"
                 />
-                {selected.kind === 'subprocess' && (
+                {(selected.kind === 'process' || selected.kind === 'subprocess') && (
                   <Text component="small">
                     Код процесса необязателен. Установить в случае необходимости использования в конкретной реализации
                     информации о коде процесса
@@ -2094,17 +2136,6 @@ function NodeEditor({
                 </div>
               </div>
             </>
-          )}
-
-          {(selected.kind === 'process' || selected.kind === 'subprocess') && (
-            <FormGroup label="Описание" fieldId="node-description">
-              <TextArea
-                id="node-description"
-                value={draft.description ?? ''}
-                onChange={(_, value) => setDraft((current) => ({ ...current, description: value }))}
-                resizeOrientation="vertical"
-              />
-            </FormGroup>
           )}
 
           {selected.kind === 'subprocess' && (
@@ -2260,18 +2291,14 @@ function NodeEditor({
                 <TextInput
                   id="reverse-output-node-name"
                   value={draft.nodeName ?? ''}
-                  onChange={(_, value) =>
-                    updateReverseOutputDraft((current) => ({ ...current, nodeName: value }), REVERSE_OUTPUT_AUTOSAVE_DELAY_MS)
-                  }
+                  onChange={(_, value) => updateReverseOutputDraft((current) => ({ ...current, nodeName: value }))}
                 />
               </FormGroup>
               <FormGroup label="Node comment" fieldId="reverse-output-node-comment">
                 <TextArea
                   id="reverse-output-node-comment"
                   value={draft.nodeComment ?? ''}
-                  onChange={(_, value) =>
-                    updateReverseOutputDraft((current) => ({ ...current, nodeComment: value }), REVERSE_OUTPUT_AUTOSAVE_DELAY_MS)
-                  }
+                  onChange={(_, value) => updateReverseOutputDraft((current) => ({ ...current, nodeComment: value }))}
                   resizeOrientation="vertical"
                 />
               </FormGroup>
@@ -2296,18 +2323,14 @@ function NodeEditor({
                 <TextInput
                   id="reverse-output-name"
                   value={draft.name ?? ''}
-                  onChange={(_, value) =>
-                    updateReverseOutputDraft((current) => ({ ...current, name: value }), REVERSE_OUTPUT_AUTOSAVE_DELAY_MS)
-                  }
+                  onChange={(_, value) => updateReverseOutputDraft((current) => ({ ...current, name: value }))}
                 />
               </FormGroup>
               <FormGroup label="Rule" fieldId="reverse-output-rule">
                 <TextInput
                   id="reverse-output-rule"
                   value={draft.rule ?? ''}
-                  onChange={(_, value) =>
-                    updateReverseOutputDraft((current) => ({ ...current, rule: value }), REVERSE_OUTPUT_AUTOSAVE_DELAY_MS)
-                  }
+                  onChange={(_, value) => updateReverseOutputDraft((current) => ({ ...current, rule: value }))}
                 />
               </FormGroup>
               <div className="stage-editor-subsection">
@@ -2323,7 +2346,7 @@ function NodeEditor({
                           ...(current.body ?? {}),
                           type: value,
                         },
-                      }), REVERSE_OUTPUT_AUTOSAVE_DELAY_MS)
+                      }))
                     }
                   />
                 </FormGroup>
@@ -2341,7 +2364,7 @@ function NodeEditor({
                             type: value,
                           },
                         },
-                      }), REVERSE_OUTPUT_AUTOSAVE_DELAY_MS)
+                      }))
                     }
                   />
                 </FormGroup>
@@ -2362,7 +2385,7 @@ function NodeEditor({
                             scenario: value,
                           },
                         },
-                      }), REVERSE_OUTPUT_AUTOSAVE_DELAY_MS)
+                      }))
                     }
                   />
                 </FormGroup>
@@ -2380,7 +2403,7 @@ function NodeEditor({
                             status: value,
                           },
                         },
-                      }), REVERSE_OUTPUT_AUTOSAVE_DELAY_MS)
+                      }))
                     }
                   />
                 </FormGroup>
@@ -2404,7 +2427,7 @@ function NodeEditor({
                             },
                           },
                         },
-                      }), REVERSE_OUTPUT_AUTOSAVE_DELAY_MS)
+                      }))
                     }
                   />
                 </FormGroup>
@@ -2428,7 +2451,7 @@ function NodeEditor({
                             },
                           },
                         },
-                      }), REVERSE_OUTPUT_AUTOSAVE_DELAY_MS)
+                      }))
                     }
                   />
                 </FormGroup>
@@ -2452,7 +2475,7 @@ function NodeEditor({
                             },
                           },
                         },
-                      }), REVERSE_OUTPUT_AUTOSAVE_DELAY_MS)
+                      }))
                     }
                     options={slaStatusOptions}
                     placeholder="Выберите SLA status"
@@ -2472,7 +2495,7 @@ function NodeEditor({
                           ...(current.log ?? {}),
                           journalServiceName: value,
                         },
-                      }), REVERSE_OUTPUT_AUTOSAVE_DELAY_MS)
+                      }))
                     }
                   />
                 </FormGroup>
@@ -2487,7 +2510,7 @@ function NodeEditor({
                           ...(current.log ?? {}),
                           message: value,
                         },
-                      }), REVERSE_OUTPUT_AUTOSAVE_DELAY_MS)
+                      }))
                     }
                     resizeOrientation="vertical"
                   />
@@ -2497,14 +2520,7 @@ function NodeEditor({
           )}
 
           <div className="editor-actions">
-            <Button onClick={save} isLoading={isSaving}>
-              Сохранить изменения
-            </Button>
-            {selected.kind === 'process' && (
-              <Button variant="secondary" onClick={onAddSubprocess} isLoading={isSaving}>
-                Добавить subprocess
-              </Button>
-            )}
+            <Text component="small">{isSaving ? 'Сохранение…' : 'Изменения сохраняются автоматически через 5 секунд.'}</Text>
             {selected.kind === 'subprocess' && (
               <Button variant="secondary" onClick={onAddStage} isLoading={isSaving}>
                 Добавить stage
@@ -2578,6 +2594,7 @@ export function App() {
   const [isTopologyFullscreen, setIsTopologyFullscreen] = useState(false);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [localProcessConfig, setLocalProcessConfig] = useState(null);
+  const [toast, setToast] = useState(null);
   const topologyContainerRef = useRef(null);
 
   const processConfigs = data?.processConfigList ?? [];
@@ -2671,6 +2688,28 @@ export function App() {
     setIsEditorOpen(Boolean(findSelectedNode(activeProcessConfig, selectedNodeId)));
   }, [activeProcessConfig, selectedNodeId]);
 
+  useEffect(() => {
+    if (!toast) {
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setToast(null);
+    }, 4000);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [toast]);
+
+  const showSaveSuccessToast = () => {
+    setToast({
+      id: Date.now(),
+      title: 'Изменения сохранены',
+      message: 'Информация по node успешно обновлена.',
+    });
+  };
+
   const saveProcessConfig = async (nextConfig) => {
     try {
       setUpdateErrorMessage('');
@@ -2682,9 +2721,11 @@ export function App() {
         },
       });
       refetch();
+      return true;
     } catch (mutationError) {
       setLocalProcessConfig(serverActiveProcessConfig);
       setUpdateErrorMessage(getErrorMessage(mutationError, 'Не удалось сохранить изменения процесса.'));
+      return false;
     }
   };
 
@@ -2696,7 +2737,7 @@ export function App() {
     const stageId = selectedNodeId.split(':')[1];
     const selectedStage = findSelectedNode(nextConfig, selectedNodeId)?.node;
     if (!selectedStage) {
-      return;
+      return false;
     }
 
     try {
@@ -2709,9 +2750,11 @@ export function App() {
         },
       });
       refetch();
+      return true;
     } catch (mutationError) {
       setLocalProcessConfig(serverActiveProcessConfig);
       setUpdateErrorMessage(getErrorMessage(mutationError, 'Не удалось сохранить изменения stage.'));
+      return false;
     }
   };
 
@@ -2723,7 +2766,7 @@ export function App() {
     const subprocessId = selectedNodeId.split(':')[1];
     const selectedSubprocess = findSelectedNode(nextConfig, selectedNodeId)?.node;
     if (!selectedSubprocess) {
-      return;
+      return false;
     }
 
     try {
@@ -2736,9 +2779,11 @@ export function App() {
         },
       });
       await refetch();
+      return true;
     } catch (mutationError) {
       setLocalProcessConfig(serverActiveProcessConfig);
       setUpdateErrorMessage(getErrorMessage(mutationError, 'Не удалось сохранить изменения subprocess.'));
+      return false;
     }
   };
 
@@ -2749,7 +2794,7 @@ export function App() {
 
     const selectedReverse = findSelectedNode(nextConfig, selectedNodeId)?.node;
     if (!selectedReverse?.id) {
-      return;
+      return false;
     }
 
     try {
@@ -2767,9 +2812,11 @@ export function App() {
         },
       });
       await refetch();
+      return true;
     } catch (mutationError) {
       setLocalProcessConfig(serverActiveProcessConfig);
       setUpdateErrorMessage(getErrorMessage(mutationError, 'Не удалось сохранить reverse.'));
+      return false;
     }
   };
 
@@ -2780,7 +2827,7 @@ export function App() {
 
     const selectedOutput = findSelectedNode(nextConfig, selectedNodeId)?.node;
     if (!selectedOutput?.id) {
-      return;
+      return false;
     }
 
     try {
@@ -2793,9 +2840,11 @@ export function App() {
         },
       });
       await refetch();
+      return true;
     } catch (mutationError) {
       setLocalProcessConfig(serverActiveProcessConfig);
       setUpdateErrorMessage(getErrorMessage(mutationError, 'Не удалось сохранить reverse output.'));
+      return false;
     }
   };
 
@@ -2806,7 +2855,7 @@ export function App() {
 
     const selectedResult = findSelectedNode(nextConfig, selectedNodeId)?.node;
     if (!selectedResult?.id) {
-      return;
+      return false;
     }
 
     try {
@@ -2830,9 +2879,11 @@ export function App() {
         },
       });
       await refetch();
+      return true;
     } catch (mutationError) {
       setLocalProcessConfig(serverActiveProcessConfig);
       setUpdateErrorMessage(getErrorMessage(mutationError, 'Не удалось сохранить result.'));
+      return false;
     }
   };
 
@@ -2844,7 +2895,7 @@ export function App() {
     const processId = selectedNodeId.split(':')[1];
     const selectedProcess = findSelectedNode(nextConfig, selectedNodeId)?.node;
     if (!selectedProcess) {
-      return;
+      return false;
     }
 
     try {
@@ -2854,7 +2905,6 @@ export function App() {
         variables: {
           id: processId,
           input: stripTypename({
-            description: selectedProcess.description ?? '',
             nodeName: selectedProcess.nodeName ?? '',
             nodeComment: selectedProcess.nodeComment ?? '',
             contextCode: normalizeReferenceDraft(selectedProcess.contextCode),
@@ -2862,9 +2912,11 @@ export function App() {
         },
       });
       refetch();
+      return true;
     } catch (mutationError) {
       setLocalProcessConfig(serverActiveProcessConfig);
       setUpdateErrorMessage(getErrorMessage(mutationError, 'Не удалось сохранить изменения process.'));
+      return false;
     }
   };
 
@@ -2901,31 +2953,26 @@ export function App() {
     }
 
     const nextConfig = updateSelectedNode(activeProcessConfig, selectedNodeId, values);
+    let saved = false;
     if (selectedNodeId.startsWith('process:')) {
-      await saveProcessNode(nextConfig);
-      return;
+      saved = await saveProcessNode(nextConfig);
+    } else if (selectedNodeId.startsWith('subprocess:')) {
+      saved = await saveSubprocessNode(nextConfig);
+    } else if (selectedNodeId.startsWith('result:')) {
+      saved = await saveResultNode(nextConfig);
+    } else if (selectedNodeId.startsWith('reverseOutput:')) {
+      saved = await saveReverseOutputNode(nextConfig);
+    } else if (selectedNodeId.startsWith('reverse:')) {
+      saved = await saveReverseNode(nextConfig);
+    } else if (selectedNodeId.startsWith('stage:')) {
+      saved = await saveStageNode(nextConfig);
+    } else {
+      saved = await saveProcessConfig(nextConfig);
     }
-    if (selectedNodeId.startsWith('subprocess:')) {
-      await saveSubprocessNode(nextConfig);
-      return;
+
+    if (saved) {
+      showSaveSuccessToast();
     }
-    if (selectedNodeId.startsWith('result:')) {
-      await saveResultNode(nextConfig);
-      return;
-    }
-    if (selectedNodeId.startsWith('reverseOutput:')) {
-      await saveReverseOutputNode(nextConfig);
-      return;
-    }
-    if (selectedNodeId.startsWith('reverse:')) {
-      await saveReverseNode(nextConfig);
-      return;
-    }
-    if (selectedNodeId.startsWith('stage:')) {
-      await saveStageNode(nextConfig);
-      return;
-    }
-    await saveProcessConfig(nextConfig);
   };
 
   const handleAddSubprocess = async () => {
@@ -3242,10 +3289,8 @@ export function App() {
           {!isInitialLoading && !error && !activeProcessConfig && (
             <EmptyState>
               <div className="topology-empty-state">
-                <Title headingLevel="h4">Процесс пока не создан</Title>
-                <EmptyStateBody>
-                  Нажмите «Создать процесс», чтобы создать `ProcessConfig` и открыть `React Flow` для редактирования.
-                </EmptyStateBody>
+                <Title headingLevel="h4">Проект пока не имеет ни одного процесса</Title>
+                <EmptyStateBody>Нажмите «Создать процесс»</EmptyStateBody>
                 <EmptyStateFooter>
                   <Button
                     onClick={handleCreateProcess}
@@ -3338,6 +3383,7 @@ export function App() {
               )}
             </div>
           </aside>
+          {toast && <Toast title={toast.title} message={toast.message} onClose={() => setToast(null)} />}
         </div>
       </div>
     </Page>

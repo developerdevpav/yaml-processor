@@ -58,11 +58,6 @@ databaseChangeLog:
                   constraints:
                     nullable: false
               - column:
-                  name: description
-                  type: VARCHAR(4000)
-                  constraints:
-                    nullable: false
-              - column:
                   name: node_name
                   type: VARCHAR(255)
               - column:
@@ -105,11 +100,6 @@ databaseChangeLog:
               - column:
                   name: context_code
                   type: VARCHAR(64)
-              - column:
-                  name: description
-                  type: VARCHAR(4000)
-                  constraints:
-                    nullable: false
               - column:
                   name: node_name
                   type: VARCHAR(255)

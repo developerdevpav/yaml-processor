@@ -29,9 +29,6 @@ class Process(
     @Column(name = "disabled")
     var disabled: Boolean = false,
 
-    @Column(name = "description", nullable = false, length = 4000)
-    var description: String = "",
-
     @Column(name = "node_name", length = 255)
     var nodeName: String? = null,
 

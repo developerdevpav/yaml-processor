@@ -362,10 +362,6 @@ class JpaGraphQlCrudService(
         val current = entityManager.find(Subprocess::class.java, entityId)
             ?: error("Subprocess with id=$entityId not found")
 
-        if (input.containsKey("description")) {
-            current.description = input["description"]?.toString() ?: ""
-        }
-
         if (input.containsKey("nodeName")) {
             current.nodeName = input["nodeName"]?.toString()?.ifBlank { null }
         }
@@ -431,10 +427,6 @@ class JpaGraphQlCrudService(
         val entityId = convertId(id, entity.idJavaType)
         val current = entityManager.find(Process::class.java, entityId)
             ?: error("Process with id=$entityId not found")
-
-        if (input.containsKey("description")) {
-            current.description = input["description"]?.toString() ?: ""
-        }
 
         if (input.containsKey("nodeName")) {
             current.nodeName = input["nodeName"]?.toString()?.ifBlank { null }
@@ -849,9 +841,12 @@ class ProcessConfigurationExportService(
     }
 
     private fun Process.nodeNameOrDescription(): String? =
-        description
-            .trim()
-            .takeIf { it.isNotEmpty() }
+        nodeName
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?: nodeComment
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
 }
 
 @Component

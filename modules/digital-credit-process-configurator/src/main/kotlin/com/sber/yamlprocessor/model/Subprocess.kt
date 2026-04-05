@@ -26,9 +26,6 @@ class Subprocess(
     @field:JsonProperty("context-code")
     var contextCode: ContextCodesDictionary? = null,
 
-    @Column(name = "description", nullable = false, length = 4000)
-    var description: String = "",
-
     @Column(name = "node_name", length = 255)
     var nodeName: String? = null,
 
