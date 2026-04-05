@@ -64,5 +64,6 @@ yaml-files/
 data/
 
 # Frontend
-frontend/node_modules/
-frontend/dist/
+modules/frontend/node_modules/
+modules/frontend/dist/
+modules/frontend/.vite/
