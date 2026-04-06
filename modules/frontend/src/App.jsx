@@ -1,5 +1,5 @@
 import { gql, useMutation, useQuery } from '@apollo/client';
-import { AlertCircle, Bell01, CheckVerified02, Edit01, Eye, Plus, Rows01, Send03, Trash01, XCircle, XClose } from '@untitledui/icons';
+import { AlertCircle, CheckVerified02, Edit01, Eye, Plus, Rows01, Sale01, Save01, Send03, Trash01, XCircle, XClose } from '@untitledui/icons';
 import { useEffect, useRef, useState } from 'react';
 import ReactFlow, {
   Controls,
@@ -45,7 +45,7 @@ function downloadBlob(blob, filename) {
 }
 
 function formatAutosaveCountdownLabel(secondsLeft) {
-  return `Автосохранение через ${Math.max(1, Math.ceil(secondsLeft))} c`;
+  return `${Math.max(1, Math.ceil(secondsLeft))} c`;
 }
 
 function isEmptyJsonValue(value) {
@@ -1866,7 +1866,7 @@ function ProcessNode({ data, selected }) {
             >
               {kind === 'result' || kind === 'reverseOutput' ? (
                 <div className="process-node__summary-list-item">
-                  {kind === 'result' && <Bell01 aria-hidden className="process-node__summary-icon" size={16} />}
+                  {kind === 'result' && <Sale01 aria-hidden className="process-node__summary-icon" size={16} />}
                   {kind === 'reverseOutput' && item.icon === 'send' && (
                     <Send03 aria-hidden className="process-node__summary-icon" size={16} />
                   )}
@@ -1891,28 +1891,6 @@ function ProcessNode({ data, selected }) {
       )}
       {isExpandable && <div className="process-node__hint">{isExpanded ? 'Скрыть дочерние' : 'Показать дочерние'}</div>}
     </div>
-  );
-}
-
-function AlignTreeButton({
-  processConfig,
-  expandedNodeIds,
-  onAlignTree,
-}) {
-  const reactFlow = useReactFlow();
-
-  const handleAlignTree = () => {
-    const nextGraph = buildTopologyModel(processConfig, expandedNodeIds);
-    onAlignTree(nextGraph);
-    window.requestAnimationFrame(() => {
-      reactFlow.fitView({ padding: 0.2, duration: 250 });
-    });
-  };
-
-  return (
-    <Button variant="secondary" onClick={handleAlignTree}>
-      Выровнять дерево
-    </Button>
   );
 }
 
@@ -1992,7 +1970,6 @@ function ProcessTopology({
             >
               Скачать YAML
             </Button>
-            <AlignTreeButton processConfig={processConfig} expandedNodeIds={expandedNodeIds} onAlignTree={setGraph} />
           </div>
           <Button variant="secondary" onClick={onToggleFullscreen}>
             {isFullscreen ? 'Свернуть экран' : 'На весь экран'}
@@ -2418,18 +2395,8 @@ function NodeEditor({
     },
   });
 
-  const editorTitle =
-    selected.kind === 'process'
-      ? `Процесс ${selected.node?.nodeName ?? ''}`.trim()
-      : selected.kind === 'subprocess'
-      ? `Подпроцесс ${selected.node?.nodeName ?? ''}`.trim()
-      : selected.kind === 'reverseOutput'
-      ? ''
-      : selected.node?.nodeName?.trim() || selected.kind;
-
   return (
     <Card className="editor-card">
-      {editorTitle && <CardTitle>{editorTitle}</CardTitle>}
       <CardBody>
         <Form>
           {(selected.kind === 'process' || selected.kind === 'subprocess') && (
@@ -2694,8 +2661,7 @@ function NodeEditor({
           )}
 
           {selected.kind === 'result' && (
-            <div className="stage-editor-section">
-              <Title headingLevel="h4">Result</Title>
+            <div className="stage-editor-section reverse-output-editor-section">
               <FormGroup label="Обрабатываемые входящие сценарии" fieldId="result-input-scenarios-0">
                 <div className="space-y-3">
                   {(draft.inputScenarios?.length ? draft.inputScenarios : ['']).map((scenario, index) => (
@@ -2724,8 +2690,12 @@ function NodeEditor({
                     Добавить сценарий
                   </Button>
                 </div>
+                <Text component="small">
+                  Укажите сценарии, на которые система должна отвечать. Если во входящем событии значение
+                  `b3event.body.service.scenario` совпадет с одним из этих сценариев или подходящим паттерном,
+                  событие будет принято в обработку для формирования ответного события.
+                </Text>
               </FormGroup>
-              <Text component="small">Для этого node сейчас отображается отдельное редактирование result. Reverse и output остаются в данных результата.</Text>
             </div>
           )}
 
@@ -3136,7 +3106,7 @@ function StageOrderEditor({ processConfig, subprocessNodeId, onReorderStages, is
                 >
                   <span className="stage-order-item__index">{index + 1}</span>
                   <span className="stage-order-item__content">
-                    <strong>{stage.executor || 'stage'}</strong>
+                    <strong>{stage.nodeName || 'stage'}</strong>
                     <small>{stage.nodeComment || 'Без описания'}</small>
                   </span>
                   <span className="stage-order-item__handle">::</span>
@@ -3157,24 +3127,10 @@ function NodeViewer({ processConfig, selectedNodeId }) {
     return null;
   }
 
-  const title =
-    selected.kind === 'process'
-      ? 'Просмотр процесса'
-      : selected.kind === 'subprocess'
-      ? 'Просмотр подпроцесса'
-      : selected.kind === 'stage'
-      ? 'Просмотр stage'
-      : selected.kind === 'result'
-      ? 'Просмотр result'
-      : selected.kind === 'reverse'
-      ? 'Просмотр reverse'
-      : 'Просмотр reverse output';
-
   const node = selected.node;
 
   return (
     <Card className="editor-card">
-      <CardTitle>{title}</CardTitle>
       <CardBody className="space-y-4">
         {selected.kind === 'process' && (
           <>
@@ -4261,13 +4217,23 @@ export function App() {
           >
             <div className="editor-drawer__header">
               <div className="editor-drawer__header-main">
-                <Title headingLevel="h3">Свойства узла</Title>
-                <div className="editor-drawer__status">
-                  {editorIsSaving
-                    ? 'Сохранение...'
-                    : autosaveStatus?.secondsLeft
-                      ? formatAutosaveCountdownLabel(autosaveStatus.secondsLeft)
-                      : 'Изменения сохраняются автоматически'}
+                {/*
+                  Idle: green bell only.
+                  Countdown: bell + seconds.
+                  Saving: bell + ellipsis.
+                */}
+                <div
+                  className={cn(
+                    'editor-drawer__status flex items-center gap-2',
+                    !editorIsSaving && !autosaveStatus?.secondsLeft && 'text-emerald-600',
+                  )}
+                >
+                  <Save01 aria-hidden size={16} className={cn(!editorIsSaving && !autosaveStatus?.secondsLeft && 'text-emerald-600')} />
+                  {(editorIsSaving || autosaveStatus?.secondsLeft) && (
+                    <span className={cn(!editorIsSaving && !autosaveStatus?.secondsLeft && 'text-emerald-600')}>
+                      {editorIsSaving ? '...' : formatAutosaveCountdownLabel(autosaveStatus.secondsLeft)}
+                    </span>
+                  )}
                 </div>
               </div>
               <Button variant="plain" onClick={handleCloseEditor} aria-label="Закрыть панель свойств">
@@ -4303,10 +4269,6 @@ export function App() {
             onClick={(event) => event.stopPropagation()}
           >
             <div className="editor-drawer__header">
-              <div className="editor-drawer__header-main">
-                <Title headingLevel="h3">Просмотр узла</Title>
-                <div className="editor-drawer__status">Режим просмотра. Изменение данных недоступно.</div>
-              </div>
               <Button variant="plain" onClick={handleCloseViewer} aria-label="Закрыть панель просмотра">
                 <XClose aria-hidden className="editor-drawer__close-icon" size={16} />
               </Button>
