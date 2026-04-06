@@ -13,6 +13,6 @@
     <description>Aggregator for frontend and backend modules</description>
 
     <modules>
-        <module>modules/digital-credit-process-configurator</module>
+        <module>modules/configurator</module>
     </modules>
 </project>

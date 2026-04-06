@@ -1,0 +1,458 @@
+package com.sber.yamlprocessor.importer
+
+import com.fasterxml.jackson.annotation.JsonAlias
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.fasterxml.jackson.annotation.JsonProperty
+import com.fasterxml.jackson.databind.DeserializationFeature
+import com.fasterxml.jackson.dataformat.yaml.YAMLMapper
+import com.sber.yamlprocessor.model.ActionPhasesDictionary
+import com.sber.yamlprocessor.model.Audit
+import com.sber.yamlprocessor.model.B3StatusDictionary
+import com.sber.yamlprocessor.model.Body
+import com.sber.yamlprocessor.model.Configurator
+import com.sber.yamlprocessor.model.ContextCodesDictionary
+import com.sber.yamlprocessor.model.EventLog
+import com.sber.yamlprocessor.model.EventObject
+import com.sber.yamlprocessor.model.Log
+import com.sber.yamlprocessor.model.Process
+import com.sber.yamlprocessor.model.ProcessConfig
+import com.sber.yamlprocessor.model.Result
+import com.sber.yamlprocessor.model.Reverse
+import com.sber.yamlprocessor.model.ReverseOutput
+import com.sber.yamlprocessor.model.Service as ServiceBody
+import com.sber.yamlprocessor.model.SlaDurationUnitDictionary
+import com.sber.yamlprocessor.model.SlaState
+import com.sber.yamlprocessor.model.SlaStatusDictionary
+import com.sber.yamlprocessor.model.Stage
+import com.sber.yamlprocessor.model.Subprocess
+import com.sber.yamlprocessor.model.Trigger
+import jakarta.persistence.EntityManager
+import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Transactional
+import org.springframework.web.multipart.MultipartFile
+import java.util.UUID
+
+data class ImportedProcessConfig(
+    val filename: String,
+    val processConfigId: UUID,
+    val processId: UUID?,
+    val contextCode: String?
+)
+
+enum class YamlImportScheme {
+    NEW,
+    LEGACY
+}
+
+@Service
+class ProcessConfigurationImportService(
+    private val entityManager: EntityManager
+) {
+    private val yamlMapper = YAMLMapper.builder()
+        .findAndAddModules()
+        .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+        .build()
+
+    @Transactional
+    fun import(files: List<MultipartFile>, scheme: YamlImportScheme = YamlImportScheme.NEW): List<ImportedProcessConfig> {
+        require(files.isNotEmpty()) { "Не выбраны YAML-файлы для импорта." }
+
+        return files.map { file ->
+            val processDefinition = parse(file, scheme)
+            val processConfig = ProcessConfig()
+            val process = processDefinition.toEntity(processConfig)
+            processConfig.process = process
+            entityManager.persist(processConfig)
+            entityManager.flush()
+
+            ImportedProcessConfig(
+                filename = file.originalFilename?.ifBlank { file.name } ?: file.name,
+                processConfigId = processConfig.id ?: error("Imported ProcessConfig id was not generated"),
+                processId = process.id,
+                contextCode = process.contextCode?.code
+            )
+        }
+    }
+
+    private fun parse(file: MultipartFile, scheme: YamlImportScheme): ImportedProcessDefinition {
+        require(!file.isEmpty) {
+            "Файл ${file.originalFilename ?: file.name} пуст."
+        }
+
+        val root = runCatching { yamlMapper.readTree(file.inputStream) }
+            .getOrElse { throw IllegalArgumentException("Не удалось прочитать YAML ${file.originalFilename ?: file.name}: ${it.message}", it) }
+
+        require(root != null && root.isObject) {
+            "Файл ${file.originalFilename ?: file.name} должен содержать YAML-объект верхнего уровня."
+        }
+
+        val processNode = if (root.has("process")) root.get("process") else root
+        return when (scheme) {
+            YamlImportScheme.NEW ->
+                runCatching { yamlMapper.treeToValue(processNode, ImportedProcessDefinition::class.java) }
+                    .getOrElse {
+                        throw IllegalArgumentException(
+                            "Файл ${file.originalFilename ?: file.name} не соответствует ожидаемой new-схеме процесса: ${it.message}",
+                            it
+                        )
+                    }
+
+            YamlImportScheme.LEGACY ->
+                runCatching { yamlMapper.treeToValue(processNode, ImportedLegacyProcessDefinition::class.java).toNewDefinition() }
+                    .getOrElse {
+                        throw IllegalArgumentException(
+                            "Файл ${file.originalFilename ?: file.name} не соответствует ожидаемой legacy-схеме процесса: ${it.message}",
+                            it
+                        )
+                    }
+        }
+    }
+
+    private fun ImportedProcessDefinition.toEntity(processConfig: ProcessConfig): Process {
+        val process = Process(
+            processConfig = processConfig,
+            contextCode = contextCode.refOrNull(ContextCodesDictionary::class.java),
+            disabled = disabled,
+            nodeName = nodeName.normalizedOrNull(),
+            nodeComment = nodeComment.normalizedOrNull()
+        )
+        process.subprocess = subprocess.map { it.toEntity(process) }.toMutableList()
+        return process
+    }
+
+    private fun ImportedSubprocessDefinition.toEntity(process: Process): Subprocess {
+        val subprocessEntity = Subprocess(
+            process = process,
+            nodeName = nodeName.normalizedOrNull(),
+            nodeComment = nodeComment.normalizedOrNull(),
+            disabled = disabled,
+            trigger = Trigger(rule = trigger.rule.orEmpty())
+        )
+        subprocessEntity.stages = stages.map { it.toEntity(subprocessEntity) }.toMutableList()
+        return subprocessEntity
+    }
+
+    private fun ImportedStageDefinition.toEntity(subprocess: Subprocess): Stage {
+        val stage = Stage(
+            subprocess = subprocess,
+            executor = executor.orEmpty(),
+            contextCode = contextCode.refOrNull(ContextCodesDictionary::class.java),
+            log = log?.toEntity(),
+            nodeName = nodeName.normalizedOrNull(),
+            nodeComment = nodeComment.normalizedOrNull(),
+            configurator = null
+        )
+        val configuratorEntity = configurator.toEntity(stage)
+        stage.configurator = configuratorEntity
+        return stage
+    }
+
+    private fun ImportedConfiguratorDefinition.toEntity(stage: Stage): Configurator {
+        val configuratorEntity = Configurator(
+            stage = stage,
+            disabled = disabled,
+            interrupted = interrupted,
+            multiple = multiple,
+            audit = audit?.toEntity(),
+            filterEventRule = filterEventRule.orEmpty()
+        )
+        configuratorEntity.result = result.map { it.toEntity(configuratorEntity) }.toMutableList()
+        return configuratorEntity
+    }
+
+    private fun ImportedResultDefinition.toEntity(configurator: Configurator): Result {
+        val resultEntity = Result(
+            configurator = configurator,
+            inputScenarios = inputScenarios.mapNotNull { it.normalizedOrNull() }.toMutableList()
+        )
+        resultEntity.reverse = reverse.map { it.toEntity(resultEntity) }.toMutableList()
+        return resultEntity
+    }
+
+    private fun ImportedReverseDefinition.toEntity(result: Result): Reverse =
+        Reverse(
+            result = result,
+            status = entityManager.getReference(B3StatusDictionary::class.java, status.orEmpty()),
+            output = output.map { it.toEntity() }.toMutableList()
+        ).also { reverseEntity ->
+            reverseEntity.output.forEach { it.reverse = reverseEntity }
+        }
+
+    private fun ImportedReverseOutputDefinition.toEntity(): ReverseOutput =
+        ReverseOutput(
+            phase = entityManager.getReference(ActionPhasesDictionary::class.java, phase.orEmpty()),
+            name = name.normalizedOrNull(),
+            rule = rule.normalizedOrNull(),
+            body = body?.toEntity() ?: Body(),
+            log = log?.toEntity() ?: EventLog()
+        )
+
+    private fun ImportedLogDefinition.toEntity(): Log =
+        Log(journalServiceName = journalServiceName.normalizedOrNull())
+
+    private fun ImportedAuditDefinition.toEntity(): Audit =
+        Audit(
+            enabled = enabled,
+            eventCode = eventCode.normalizedOrNull(),
+            eventDescription = eventDescription.normalizedOrNull()
+        )
+
+    private fun ImportedEventLogDefinition.toEntity(): EventLog =
+        EventLog(
+            journalServiceName = journalServiceName.orEmpty(),
+            message = message.normalizedOrNull()
+        )
+
+    private fun ImportedBodyDefinition.toEntity(): Body =
+        Body(
+            eventObject = eventObject?.toEntity(),
+            service = service?.toEntity(),
+            type = type.normalizedOrNull()
+        )
+
+    private fun ImportedEventObjectDefinition.toEntity(): EventObject =
+        EventObject(type = type.normalizedOrNull())
+
+    private fun ImportedServiceDefinition.toEntity(): ServiceBody =
+        ServiceBody(
+            scenario = scenario.orEmpty(),
+            type = type.normalizedOrNull(),
+            status = status.normalizedOrNull(),
+            sla = sla?.toEntity()
+        )
+
+    private fun ImportedSlaStateDefinition.toEntity(): SlaState =
+        SlaState(
+            status = status.refOrNull(SlaStatusDictionary::class.java),
+            durationValue = durationValue,
+            durationUnit = durationUnit.refOrNull(SlaDurationUnitDictionary::class.java)
+        )
+
+    private fun String?.normalizedOrNull(): String? =
+        this?.trim()?.takeIf { it.isNotEmpty() }
+
+    private fun <T> String?.refOrNull(type: Class<T>): T? {
+        val code = normalizedOrNull() ?: return null
+        return entityManager.getReference(type, code)
+    }
+}
+
+@JsonIgnoreProperties(ignoreUnknown = false)
+data class ImportedProcessDefinition(
+    val id: String? = null,
+    @field:JsonProperty("context-code")
+    @field:JsonAlias("contextCode")
+    val contextCode: String? = null,
+    val disabled: Boolean = false,
+    @field:JsonProperty("node_name")
+    @field:JsonAlias("nodeName")
+    val nodeName: String? = null,
+    @field:JsonProperty("node_comment")
+    @field:JsonAlias("nodeComment")
+    val nodeComment: String? = null,
+    val subprocess: List<ImportedSubprocessDefinition> = emptyList()
+)
+
+@JsonIgnoreProperties(ignoreUnknown = false)
+data class ImportedSubprocessDefinition(
+    val id: String? = null,
+    @field:JsonProperty("context-code")
+    @field:JsonAlias("contextCode")
+    val contextCode: String? = null,
+    @field:JsonProperty("node_name")
+    @field:JsonAlias("nodeName")
+    val nodeName: String? = null,
+    @field:JsonProperty("node_comment")
+    @field:JsonAlias("nodeComment")
+    val nodeComment: String? = null,
+    val disabled: Boolean = false,
+    val trigger: ImportedTriggerDefinition = ImportedTriggerDefinition(),
+    val stages: List<ImportedStageDefinition> = emptyList()
+)
+
+@JsonIgnoreProperties(ignoreUnknown = false)
+data class ImportedStageDefinition(
+    val id: String? = null,
+    val executor: String? = null,
+    val log: ImportedLogDefinition? = null,
+    @field:JsonProperty("context-code")
+    @field:JsonAlias("contextCode")
+    val contextCode: String? = null,
+    @field:JsonProperty("node_name")
+    @field:JsonAlias("nodeName")
+    val nodeName: String? = null,
+    @field:JsonProperty("node_comment")
+    @field:JsonAlias("nodeComment")
+    val nodeComment: String? = null,
+    val configurator: ImportedConfiguratorDefinition = ImportedConfiguratorDefinition()
+)
+
+@JsonIgnoreProperties(ignoreUnknown = false)
+data class ImportedConfiguratorDefinition(
+    val id: String? = null,
+    val disabled: Boolean = false,
+    val interrupted: Boolean = true,
+    val multiple: Boolean = false,
+    val audit: ImportedAuditDefinition? = null,
+    @field:JsonProperty("filter-event-rule")
+    @field:JsonAlias("filterEventRule")
+    val filterEventRule: String? = null,
+    val result: List<ImportedResultDefinition> = emptyList()
+)
+
+@JsonIgnoreProperties(ignoreUnknown = false)
+data class ImportedResultDefinition(
+    val id: String? = null,
+    @field:JsonProperty("input-scenarios")
+    @field:JsonAlias("inputScenarios")
+    val inputScenarios: List<String> = emptyList(),
+    val reverse: List<ImportedReverseDefinition> = emptyList()
+)
+
+@JsonIgnoreProperties(ignoreUnknown = false)
+data class ImportedReverseDefinition(
+    val id: String? = null,
+    val status: String? = null,
+    val output: List<ImportedReverseOutputDefinition> = emptyList()
+)
+
+@JsonIgnoreProperties(ignoreUnknown = false)
+data class ImportedReverseOutputDefinition(
+    val id: String? = null,
+    val phase: String? = null,
+    val name: String? = null,
+    val rule: String? = null,
+    val body: ImportedBodyDefinition? = null,
+    val log: ImportedEventLogDefinition? = null
+)
+
+@JsonIgnoreProperties(ignoreUnknown = false)
+data class ImportedBodyDefinition(
+    @field:JsonProperty("event-object")
+    @field:JsonAlias("eventObject")
+    val eventObject: ImportedEventObjectDefinition? = null,
+    val service: ImportedServiceDefinition? = null,
+    val type: String? = null
+)
+
+@JsonIgnoreProperties(ignoreUnknown = false)
+data class ImportedServiceDefinition(
+    val scenario: String? = null,
+    val type: String? = null,
+    val status: String? = null,
+    val sla: ImportedSlaStateDefinition? = null
+)
+
+@JsonIgnoreProperties(ignoreUnknown = false)
+data class ImportedSlaStateDefinition(
+    val status: String? = null,
+    @field:JsonProperty("duration_value")
+    @field:JsonAlias("durationValue")
+    val durationValue: Int? = null,
+    @field:JsonProperty("duration_unit")
+    @field:JsonAlias("durationUnit")
+    val durationUnit: String? = null
+)
+
+@JsonIgnoreProperties(ignoreUnknown = false)
+data class ImportedEventObjectDefinition(
+    val type: String? = null
+)
+
+@JsonIgnoreProperties(ignoreUnknown = false)
+data class ImportedLogDefinition(
+    @field:JsonProperty("journal-service-name")
+    @field:JsonAlias("journalServiceName")
+    val journalServiceName: String? = null
+)
+
+@JsonIgnoreProperties(ignoreUnknown = false)
+data class ImportedEventLogDefinition(
+    @field:JsonProperty("journal-service-name")
+    @field:JsonAlias("journalServiceName")
+    val journalServiceName: String? = null,
+    val message: String? = null
+)
+
+@JsonIgnoreProperties(ignoreUnknown = false)
+data class ImportedAuditDefinition(
+    val enabled: Boolean = false,
+    @field:JsonProperty("event-code")
+    @field:JsonAlias("eventCode")
+    val eventCode: String? = null,
+    @field:JsonProperty("event-description")
+    @field:JsonAlias("eventDescription")
+    val eventDescription: String? = null
+)
+
+@JsonIgnoreProperties(ignoreUnknown = false)
+data class ImportedTriggerDefinition(
+    val rule: String? = null
+)
+
+@JsonIgnoreProperties(ignoreUnknown = false)
+data class ImportedLegacyProcessDefinition(
+    val id: String? = null,
+    @field:JsonProperty("context-code")
+    @field:JsonAlias("contextCode")
+    val contextCode: String? = null,
+    val disabled: Boolean = false,
+    val description: String? = null,
+    val subprocess: List<ImportedLegacySubprocessDefinition> = emptyList()
+)
+
+@JsonIgnoreProperties(ignoreUnknown = false)
+data class ImportedLegacySubprocessDefinition(
+    val id: String? = null,
+    @field:JsonProperty("context-code")
+    @field:JsonAlias("contextCode")
+    val contextCode: String? = null,
+    val description: String? = null,
+    val disabled: Boolean = false,
+    val trigger: ImportedTriggerDefinition = ImportedTriggerDefinition(),
+    val stages: List<ImportedLegacyStageDefinition> = emptyList()
+)
+
+@JsonIgnoreProperties(ignoreUnknown = false)
+data class ImportedLegacyStageDefinition(
+    val id: String? = null,
+    val executor: String? = null,
+    val log: ImportedLogDefinition? = null,
+    @field:JsonProperty("context-code")
+    @field:JsonAlias("contextCode")
+    val contextCode: String? = null,
+    val description: String? = null,
+    val configurator: ImportedConfiguratorDefinition = ImportedConfiguratorDefinition()
+)
+
+private fun ImportedLegacyProcessDefinition.toNewDefinition(): ImportedProcessDefinition =
+    ImportedProcessDefinition(
+        id = id,
+        contextCode = contextCode,
+        disabled = disabled,
+        nodeName = id,
+        nodeComment = description,
+        subprocess = subprocess.map { it.toNewDefinition() }
+    )
+
+private fun ImportedLegacySubprocessDefinition.toNewDefinition(): ImportedSubprocessDefinition =
+    ImportedSubprocessDefinition(
+        id = id,
+        contextCode = contextCode,
+        nodeName = id,
+        nodeComment = description,
+        disabled = disabled,
+        trigger = trigger,
+        stages = stages.map { it.toNewDefinition() }
+    )
+
+private fun ImportedLegacyStageDefinition.toNewDefinition(): ImportedStageDefinition =
+    ImportedStageDefinition(
+        id = id,
+        executor = executor,
+        log = log,
+        contextCode = contextCode,
+        nodeName = id,
+        nodeComment = description,
+        configurator = configurator
+    )

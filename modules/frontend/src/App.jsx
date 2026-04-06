@@ -1,6 +1,7 @@
 import { gql, useMutation, useQuery } from '@apollo/client';
-import { AlertCircle, CheckVerified02, Edit01, Eye, Plus, Rows01, Sale01, Save01, Send03, Trash01, XCircle, XClose } from '@untitledui/icons';
+import { AlertCircle, CheckVerified02, Edit01, Eye, File02, Plus, Rows01, Sale01, Save01, Trash01, XCircle, XClose } from '@untitledui/icons';
 import { useEffect, useRef, useState } from 'react';
+import { Button as AriaButton, Menu, MenuItem, MenuTrigger, Popover } from 'react-aria-components';
 import ReactFlow, {
   Controls,
   Handle,
@@ -46,6 +47,22 @@ function downloadBlob(blob, filename) {
 
 function formatAutosaveCountdownLabel(secondsLeft) {
   return `${Math.max(1, Math.ceil(secondsLeft))} c`;
+}
+
+function formatDateTime(value) {
+  if (!value) {
+    return '—';
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat('ru-RU', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  }).format(date);
 }
 
 function isEmptyJsonValue(value) {
@@ -154,6 +171,53 @@ function Button({
   );
 }
 
+function YamlActionsMenu({
+  onImport,
+  onExport,
+  isImporting = false,
+  isExporting = false,
+  canExport = false,
+}) {
+  return (
+    <MenuTrigger>
+      <AriaButton
+        className={cn(
+          'inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-300 transition hover:bg-slate-50',
+          (isImporting || isExporting) && 'cursor-not-allowed opacity-60',
+        )}
+        isDisabled={isImporting || isExporting}
+      >
+        {isImporting || isExporting ? (
+          <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+        ) : (
+          <File02 aria-hidden size={16} />
+        )}
+        Экспорт/импорт
+      </AriaButton>
+      <Popover
+        offset={6}
+        className="min-w-[220px] overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-[0_12px_32px_rgba(16,24,40,0.12)] outline-none"
+      >
+        <Menu className="outline-none">
+          <MenuItem
+            onAction={onImport}
+            className="cursor-pointer rounded-lg px-3 py-2 text-sm text-slate-700 outline-none transition hover:bg-slate-50"
+          >
+            Импортировать YAML
+          </MenuItem>
+          <MenuItem
+            onAction={onExport}
+            isDisabled={!canExport}
+            className="cursor-pointer rounded-lg px-3 py-2 text-sm text-slate-700 outline-none transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Экспортировать YAML
+          </MenuItem>
+        </Menu>
+      </Popover>
+    </MenuTrigger>
+  );
+}
+
 function Toast({ title, message, onClose, variant = 'success' }) {
   const isError = variant === 'error';
   return (
@@ -168,6 +232,148 @@ function Toast({ title, message, onClose, variant = 'success' }) {
       <button type="button" className="app-toast__close" onClick={onClose} aria-label="Закрыть уведомление">
         <XClose aria-hidden size={16} />
       </button>
+    </div>
+  );
+}
+
+function FileUploadModal({
+  isOpen,
+  files,
+  scheme,
+  isSubmitting,
+  errorMessage,
+  onClose,
+  onSubmit,
+  onSchemeChange,
+  onFilesSelected,
+  onRemoveFile,
+}) {
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return undefined;
+    }
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
+  if (!isOpen) {
+    return null;
+  }
+
+  const handleFileChange = (event) => {
+    const nextFiles = Array.from(event.target.files ?? []);
+    if (nextFiles.length > 0) {
+      onFilesSelected(nextFiles);
+    }
+    event.target.value = '';
+  };
+
+  const handleDrop = (event) => {
+    event.preventDefault();
+    const nextFiles = Array.from(event.dataTransfer?.files ?? []).filter((file) =>
+      /\.ya?ml$/i.test(file.name),
+    );
+    if (nextFiles.length > 0) {
+      onFilesSelected(nextFiles);
+    }
+  };
+
+  return (
+    <div className="modal-shell" role="dialog" aria-modal="true" aria-labelledby="yaml-import-title">
+      <div className="modal-shell__backdrop" onClick={onClose} />
+      <div className="modal-card">
+        <div className="modal-card__header">
+          <div>
+            <Title headingLevel="h4" className="modal-card__title">
+              <span id="yaml-import-title">Импортировать YAML</span>
+            </Title>
+            <Text className="modal-card__subtitle">
+              Загрузите один или несколько YAML-файлов. Для каждого файла backend создаст новый процесс.
+            </Text>
+          </div>
+          <button type="button" className="modal-card__close" onClick={onClose} aria-label="Закрыть окно импорта">
+            <XClose aria-hidden size={18} />
+          </button>
+        </div>
+
+        <div
+          className="file-uploader"
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={handleDrop}
+        >
+          <div className="file-uploader__icon">
+            <Plus aria-hidden size={20} />
+          </div>
+          <div className="file-uploader__title">Перетащите YAML сюда</div>
+          <div className="file-uploader__subtitle">или выберите файлы вручную</div>
+          <Button variant="secondary" onClick={() => inputRef.current?.click()}>
+            Выбрать файлы
+          </Button>
+          <input
+            ref={inputRef}
+            type="file"
+            hidden
+            multiple
+            accept=".yaml,.yml"
+            onChange={handleFileChange}
+          />
+        </div>
+
+        <FormGroup label="Схема импорта" fieldId="yaml-import-scheme">
+          <ProcessSelectField
+            id="yaml-import-scheme"
+            value={scheme}
+            onChange={onSchemeChange}
+            options={[
+              { value: 'NEW', label: 'New schema.json' },
+              { value: 'LEGACY', label: 'Legacy schema_legacy.json' },
+            ]}
+            placeholder="Выберите схему"
+            isDisabled={isSubmitting}
+          />
+        </FormGroup>
+
+        {files.length > 0 && (
+          <div className="file-uploader__list">
+            {files.map((file, index) => (
+              <div key={`${file.name}-${file.size}-${file.lastModified}-${index}`} className="file-uploader__item">
+                <div>
+                  <div className="file-uploader__filename">{file.name}</div>
+                  <div className="file-uploader__meta">{Math.max(1, Math.round(file.size / 1024))} KB</div>
+                </div>
+                <button
+                  type="button"
+                  className="file-uploader__remove"
+                  onClick={() => onRemoveFile(index)}
+                  aria-label={`Удалить ${file.name}`}
+                >
+                  <XClose aria-hidden size={16} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {errorMessage && <div className="file-uploader__error">{errorMessage}</div>}
+
+        <div className="modal-card__footer">
+          <Button variant="secondary" onClick={onClose} isDisabled={isSubmitting}>
+            Отмена
+          </Button>
+          <Button onClick={onSubmit} isLoading={isSubmitting} isDisabled={files.length === 0}>
+            Импортировать
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -416,6 +622,8 @@ const PROCESS_FIELDS = gql`
     }
     processConfigList {
       id
+      createdAt
+      updatedAt
       process {
         id
         nodeName
@@ -466,6 +674,12 @@ const UPDATE_PROCESS = gql`
     updateProcessConfig(id: $id, input: $input) {
       id
     }
+  }
+`;
+
+const DELETE_PROCESS_CONFIG = gql`
+  mutation DeleteProcessConfig($id: ID!) {
+    deleteProcessConfig(id: $id)
   }
 `;
 
@@ -1868,7 +2082,7 @@ function ProcessNode({ data, selected }) {
                 <div className="process-node__summary-list-item">
                   {kind === 'result' && <Sale01 aria-hidden className="process-node__summary-icon" size={16} />}
                   {kind === 'reverseOutput' && item.icon === 'send' && (
-                    <Send03 aria-hidden className="process-node__summary-icon" size={16} />
+                    <File02 aria-hidden className="process-node__summary-icon" size={16} />
                   )}
                   {kind === 'reverseOutput' && item.icon === 'check' && (
                     <CheckVerified02
@@ -1931,12 +2145,16 @@ function ProcessTopology({
   onAddChildNode,
   onAddSubprocess,
   onCreateProcess,
+  onDeleteProcessConfig,
+  onImportProcessConfig,
   onExportProcessConfig,
   onSelectProcessConfig,
   onToggleFullscreen,
   isFullscreen,
   isCreateDisabled,
   isCreating,
+  isDeleting,
+  isImporting,
   isExporting,
 }) {
   const [graph, setGraph] = useState({ nodes: [], edges: [] });
@@ -1953,6 +2171,21 @@ function ProcessTopology({
             <Button onClick={onCreateProcess} isLoading={isCreating} isDisabled={isCreateDisabled}>
               Создать процесс
             </Button>
+            <Button
+              variant="secondary"
+              onClick={onDeleteProcessConfig}
+              isLoading={isDeleting}
+              isDisabled={!selectedProcessConfigId}
+            >
+              Удалить процесс
+            </Button>
+            <YamlActionsMenu
+              onImport={onImportProcessConfig}
+              onExport={onExportProcessConfig}
+              isImporting={isImporting}
+              isExporting={isExporting}
+              canExport={Boolean(selectedProcessConfigId)}
+            />
             <ProcessSelectField
               id="topology-process-select"
               className="topology-toolbar__select"
@@ -1962,14 +2195,6 @@ function ProcessTopology({
               placeholder="Выберите процесс"
               isDisabled={processConfigOptions.length === 0}
             />
-            <Button
-              variant="secondary"
-              onClick={onExportProcessConfig}
-              isLoading={isExporting}
-              isDisabled={!selectedProcessConfigId}
-            >
-              Скачать YAML
-            </Button>
           </div>
           <Button variant="secondary" onClick={onToggleFullscreen}>
             {isFullscreen ? 'Свернуть экран' : 'На весь экран'}
@@ -3228,6 +3453,9 @@ export function App() {
   const [createProcess, createState] = useMutation(CREATE_PROCESS, {
     fetchPolicy: 'no-cache',
   });
+  const [deleteProcessConfig, deleteProcessConfigState] = useMutation(DELETE_PROCESS_CONFIG, {
+    fetchPolicy: 'no-cache',
+  });
   const [updateProcess, updateState] = useMutation(UPDATE_PROCESS, {
     fetchPolicy: 'no-cache',
   });
@@ -3297,12 +3525,17 @@ export function App() {
   const [createErrorMessage, setCreateErrorMessage] = useState('');
   const [updateErrorMessage, setUpdateErrorMessage] = useState('');
   const [exportErrorMessage, setExportErrorMessage] = useState('');
+  const [importErrorMessage, setImportErrorMessage] = useState('');
   const [isTopologyFullscreen, setIsTopologyFullscreen] = useState(false);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [localProcessConfig, setLocalProcessConfig] = useState(null);
   const [editorPreview, setEditorPreview] = useState(null);
   const [toast, setToast] = useState(null);
   const [isExportingProcessConfig, setIsExportingProcessConfig] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [isImportingProcessConfig, setIsImportingProcessConfig] = useState(false);
+  const [importFiles, setImportFiles] = useState([]);
+  const [importScheme, setImportScheme] = useState('NEW');
   const [autosaveStatus, setAutosaveStatus] = useState(null);
   const topologyContainerRef = useRef(null);
 
@@ -3316,6 +3549,7 @@ export function App() {
   const processConfigOptions = processConfigs.map((item) => ({
     value: item.id,
     label: item.process?.contextCode?.code || item.process?.nodeName || `Process ${item.id}`,
+    description: `ID: ${item.id} | Создан: ${formatDateTime(item.createdAt)} | Обновлен: ${formatDateTime(item.updatedAt)}`,
   }));
   const editorIsSaving =
     createSubprocessState.loading ||
@@ -3447,13 +3681,17 @@ export function App() {
     };
   }, [toast]);
 
-  const showSaveSuccessToast = () => {
+  const showSuccessToast = (title, message) => {
     setToast({
       id: Date.now(),
       variant: 'success',
-      title: 'Изменения сохранены',
-      message: 'Информация по node успешно обновлена.',
+      title,
+      message,
     });
+  };
+
+  const showSaveSuccessToast = () => {
+    showSuccessToast('Изменения сохранены', 'Информация по node успешно обновлена.');
   };
 
   const showErrorToast = (message) => {
@@ -3486,6 +3724,12 @@ export function App() {
       showErrorToast(exportErrorMessage);
     }
   }, [exportErrorMessage]);
+
+  useEffect(() => {
+    if (importErrorMessage) {
+      showErrorToast(importErrorMessage);
+    }
+  }, [importErrorMessage]);
 
   const saveProcessConfig = async (nextConfig) => {
     try {
@@ -4064,6 +4308,7 @@ export function App() {
     setAutosaveStatus(null);
     setUpdateErrorMessage('');
     setExportErrorMessage('');
+    setImportErrorMessage('');
   };
 
   const handleExportProcessConfig = async () => {
@@ -4089,6 +4334,133 @@ export function App() {
       setExportErrorMessage(getErrorMessage(requestError, 'Не удалось скачать YAML-конфигурацию процесса.'));
     } finally {
       setIsExportingProcessConfig(false);
+    }
+  };
+
+  const handleDeleteProcessConfig = async () => {
+    if (!activeProcessConfig?.id || deleteProcessConfigState.loading) {
+      return;
+    }
+
+    const processLabel =
+      activeProcessConfig.process?.contextCode?.code ||
+      activeProcessConfig.process?.nodeName ||
+      activeProcessConfig.id;
+    const shouldDelete = window.confirm(
+      `Удалить процесс "${processLabel}"?\nБудет удален весь process config со всеми subprocess, stage, configurator, result, reverse и output.`,
+    );
+    if (!shouldDelete) {
+      return;
+    }
+
+    try {
+      setUpdateErrorMessage('');
+      await deleteProcessConfig({
+        variables: {
+          id: activeProcessConfig.id,
+        },
+      });
+      setSelectedConfigId(null);
+      setSelectedNodeId(null);
+      setEditorNodeId(null);
+      setViewerNodeId(null);
+      setStageOrderNodeId(null);
+      setLocalProcessConfig(null);
+      setEditorPreview(null);
+      setIsEditorOpen(false);
+      setExpandedNodeIds([]);
+      await refetch();
+      showSuccessToast('Процесс удален', `Процесс "${processLabel}" удален вместе со всей вложенной конфигурацией.`);
+    } catch (mutationError) {
+      setUpdateErrorMessage(getErrorMessage(mutationError, 'Не удалось удалить процесс.'));
+    }
+  };
+
+  const handleOpenImportModal = () => {
+    setImportErrorMessage('');
+    setImportFiles([]);
+    setImportScheme('NEW');
+    setIsImportModalOpen(true);
+  };
+
+  const handleCloseImportModal = (force = false) => {
+    if (isImportingProcessConfig && !force) {
+      return;
+    }
+
+    setIsImportModalOpen(false);
+    setImportFiles([]);
+    setImportScheme('NEW');
+    setImportErrorMessage('');
+  };
+
+  const handleImportFilesSelected = (files) => {
+    setImportErrorMessage('');
+    setImportFiles((current) => {
+      const nextByKey = new Map(
+        current.map((file) => [`${file.name}:${file.size}:${file.lastModified}`, file]),
+      );
+      files
+        .filter((file) => /\.ya?ml$/i.test(file.name))
+        .forEach((file) => nextByKey.set(`${file.name}:${file.size}:${file.lastModified}`, file));
+      return Array.from(nextByKey.values());
+    });
+  };
+
+  const handleRemoveImportFile = (index) => {
+    setImportFiles((current) => current.filter((_, fileIndex) => fileIndex !== index));
+  };
+
+  const handleImportProcessConfigs = async () => {
+    if (importFiles.length === 0 || isImportingProcessConfig) {
+      return;
+    }
+
+    try {
+      setImportErrorMessage('');
+      setIsImportingProcessConfig(true);
+
+      const formData = new FormData();
+      importFiles.forEach((file) => {
+        formData.append('files', file);
+      });
+
+      const response = await fetch(`/api/process-configs/import?scheme=${encodeURIComponent(importScheme)}`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || `HTTP ${response.status}`);
+      }
+
+      const payload = await response.json();
+      const imported = Array.isArray(payload?.imported) ? payload.imported : [];
+      const lastImported = imported[imported.length - 1] ?? null;
+
+      await refetch();
+
+      if (lastImported?.processConfigId) {
+        setSelectedConfigId(lastImported.processConfigId);
+        setSelectedNodeId(lastImported.processId ? `process:${lastImported.processId}` : null);
+        setEditorNodeId(lastImported.processId ? `process:${lastImported.processId}` : null);
+        setViewerNodeId(null);
+        setStageOrderNodeId(null);
+        setIsEditorOpen(Boolean(lastImported.processId));
+      }
+
+      showSuccessToast(
+        'Импорт завершён',
+        imported.length > 1
+          ? `Создано процессов: ${imported.length}.`
+          : `Файл ${imported[0]?.filename ?? 'YAML'} успешно импортирован.`,
+      );
+      handleCloseImportModal(true);
+    } catch (requestError) {
+      setImportErrorMessage(getErrorMessage(requestError, 'Не удалось импортировать YAML-файлы.'));
+    } finally {
+      setIsImportingProcessConfig(false);
     }
   };
 
@@ -4165,13 +4537,22 @@ export function App() {
                 <Title headingLevel="h4">Проект пока не имеет ни одного процесса</Title>
                 <EmptyStateBody>Нажмите «Создать процесс»</EmptyStateBody>
                 <EmptyStateFooter>
-                  <Button
-                    onClick={handleCreateProcess}
-                    isLoading={createState.loading}
-                    isDisabled={processCodeOptions.length === 0}
-                  >
-                    Создать процесс
-                  </Button>
+                  <div className="flex flex-wrap items-center justify-center gap-3">
+                    <Button
+                      onClick={handleCreateProcess}
+                      isLoading={createState.loading}
+                      isDisabled={processCodeOptions.length === 0}
+                    >
+                      Создать процесс
+                    </Button>
+                    <YamlActionsMenu
+                      onImport={handleOpenImportModal}
+                      onExport={handleExportProcessConfig}
+                      isImporting={isImportingProcessConfig}
+                      isExporting={isExportingProcessConfig}
+                      canExport={false}
+                    />
+                  </div>
                 </EmptyStateFooter>
                 {processCodeOptions.length === 0 && (
                   <EmptyStateBody>Нет доступных кодов процесса в справочнике `contextCodesDictionaryList`.</EmptyStateBody>
@@ -4195,12 +4576,16 @@ export function App() {
               onAddChildNode={handleAddChildNode}
               onAddSubprocess={handleAddSubprocess}
               onCreateProcess={handleCreateProcess}
+              onDeleteProcessConfig={handleDeleteProcessConfig}
+              onImportProcessConfig={handleOpenImportModal}
               onExportProcessConfig={handleExportProcessConfig}
               onSelectProcessConfig={handleSelectProcessConfig}
               onToggleFullscreen={handleToggleTopologyFullscreen}
               isFullscreen={isTopologyFullscreen}
               isCreateDisabled={processCodeOptions.length === 0}
               isCreating={createState.loading}
+              isDeleting={deleteProcessConfigState.loading}
+              isImporting={isImportingProcessConfig}
               isExporting={isExportingProcessConfig}
             />
           )}
@@ -4305,6 +4690,18 @@ export function App() {
               />
             </div>
           </aside>
+          <FileUploadModal
+            isOpen={isImportModalOpen}
+            files={importFiles}
+            scheme={importScheme}
+            isSubmitting={isImportingProcessConfig}
+            errorMessage={importErrorMessage}
+            onClose={handleCloseImportModal}
+            onSubmit={handleImportProcessConfigs}
+            onSchemeChange={setImportScheme}
+            onFilesSelected={handleImportFilesSelected}
+            onRemoveFile={handleRemoveImportFile}
+          />
           {toast && <Toast title={toast.title} message={toast.message} variant={toast.variant} onClose={() => setToast(null)} />}
         </div>
       </div>

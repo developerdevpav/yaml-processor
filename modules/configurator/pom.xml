@@ -13,9 +13,9 @@
     </parent>
 
     <groupId>com.sber</groupId>
-    <artifactId>digital-credit-process-configurator</artifactId>
+    <artifactId>configurator</artifactId>
     <version>1.0.0</version>
-    <name>digital-credit-process-configurator</name>
+    <name>configurator</name>
     <description>Spring приложение для работы с YAML файлами согласно JSON схеме</description>
 
     <properties>

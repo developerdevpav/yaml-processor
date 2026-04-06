@@ -16,7 +16,7 @@ React frontend для редактирования доменной модели
 1. Запустить backend:
 
 ```bash
-cd modules/digital-credit-process-configurator
+cd modules/configurator
 mvn spring-boot:run
 ```
 

@@ -1,6 +1,6 @@
 import { Check, ChevronDown } from '@untitledui/icons';
 import { twMerge } from 'tailwind-merge';
-import { Button, ListBox, ListBoxItem, Popover, Select, SelectValue } from 'react-aria-components';
+import { Button, ListBox, ListBoxItem, Popover, Select } from 'react-aria-components';
 
 const EMPTY_KEY = '__empty__';
 
@@ -41,6 +41,7 @@ export function ProcessSelectField({
   const normalizedOptions = options.map((option) =>
     typeof option === 'string' ? { value: option, label: option } : option
   );
+  const selectedOption = normalizedOptions.find((option) => option.value === value) ?? null;
 
   return (
     <Select
@@ -55,11 +56,18 @@ export function ProcessSelectField({
       isDisabled={isDisabled}
     >
       <Button id={id} className={triggerClassName}>
-        <SelectValue
-          className={({ isPlaceholder }) =>
-            twMerge('min-w-0 flex-1 truncate', isPlaceholder && 'text-slate-400')
-          }
-        />
+        <div className="min-w-0 flex-1">
+          {selectedOption ? (
+            <>
+              <div className="truncate">{selectedOption.label}</div>
+              {selectedOption.description ? (
+                <div className="truncate text-xs font-normal text-slate-500">{selectedOption.description}</div>
+              ) : null}
+            </>
+          ) : (
+            <div className="truncate text-slate-400">{placeholder}</div>
+          )}
+        </div>
         <ChevronDown size={16} aria-hidden className="shrink-0 text-slate-400 transition duration-200" />
       </Button>
       <Popover className={popoverClassName} offset={6}>
@@ -76,7 +84,12 @@ export function ProcessSelectField({
             <ListBoxItem key={opt.value} id={opt.value} textValue={opt.label} className={itemClassName}>
               {({ isSelected }) => (
                 <>
-                  <span className="min-w-0 flex-1 truncate">{opt.label}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate">{opt.label}</div>
+                    {opt.description ? (
+                      <div className="truncate text-xs font-normal text-slate-500">{opt.description}</div>
+                    ) : null}
+                  </div>
                   {isSelected ? <Check size={16} className="shrink-0 text-[#7f56d9]" aria-hidden /> : <span className="h-4 w-4 shrink-0" />}
                 </>
               )}

@@ -1,0 +1,395 @@
+{
+  "$schema": "http://json-schema.org/draft-06/schema#",
+  "title": "Digital Credit Process Configuration (New)",
+  "description": "Schema for the current domain model YAML import/export format.",
+  "oneOf": [
+    {
+      "$ref": "#/definitions/ProcessConfig"
+    },
+    {
+      "$ref": "#/definitions/Process"
+    }
+  ],
+  "definitions": {
+    "ProcessConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "process": {
+          "$ref": "#/definitions/Process"
+        }
+      },
+      "required": [
+        "process"
+      ]
+    },
+    "Process": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "context-code": {
+          "$ref": "#/definitions/ContextCodes"
+        },
+        "disabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "node_name": {
+          "type": "string"
+        },
+        "node_comment": {
+          "type": "string"
+        },
+        "subprocess": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Subprocess"
+          },
+          "default": []
+        }
+      }
+    },
+    "Subprocess": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "context-code": {
+          "$ref": "#/definitions/ContextCodes"
+        },
+        "disabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "node_name": {
+          "type": "string"
+        },
+        "node_comment": {
+          "type": "string"
+        },
+        "trigger": {
+          "$ref": "#/definitions/Trigger"
+        },
+        "stages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Stage"
+          },
+          "default": []
+        }
+      }
+    },
+    "Stage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "executor": {
+          "type": "string"
+        },
+        "log": {
+          "$ref": "#/definitions/Log"
+        },
+        "context-code": {
+          "$ref": "#/definitions/ContextCodes"
+        },
+        "node_name": {
+          "type": "string"
+        },
+        "node_comment": {
+          "type": "string"
+        },
+        "configurator": {
+          "$ref": "#/definitions/Configurator"
+        }
+      },
+      "required": [
+        "executor"
+      ]
+    },
+    "Configurator": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "disabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "interrupted": {
+          "type": "boolean",
+          "default": true
+        },
+        "multiple": {
+          "type": "boolean",
+          "default": false
+        },
+        "audit": {
+          "$ref": "#/definitions/Audit"
+        },
+        "filter-event-rule": {
+          "type": "string"
+        },
+        "result": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Result"
+          },
+          "default": []
+        }
+      }
+    },
+    "Audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "event-code": {
+          "type": "string"
+        },
+        "event-description": {
+          "type": "string"
+        }
+      }
+    },
+    "Result": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "input-scenarios": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "reverse": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Reverse"
+          },
+          "default": []
+        }
+      }
+    },
+    "Reverse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/B3Status"
+        },
+        "output": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ReverseOutput"
+          },
+          "default": []
+        }
+      },
+      "required": [
+        "status"
+      ]
+    },
+    "ReverseOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "phase": {
+          "$ref": "#/definitions/ActionPhases"
+        },
+        "name": {
+          "type": "string"
+        },
+        "rule": {
+          "type": "string"
+        },
+        "body": {
+          "$ref": "#/definitions/Body"
+        },
+        "log": {
+          "$ref": "#/definitions/EventLog"
+        }
+      },
+      "required": [
+        "phase"
+      ]
+    },
+    "Body": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "event-object": {
+          "$ref": "#/definitions/EventObject"
+        },
+        "service": {
+          "$ref": "#/definitions/Service"
+        },
+        "type": {
+          "type": "string"
+        }
+      }
+    },
+    "EventObject": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string"
+        }
+      }
+    },
+    "Service": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "scenario": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "sla": {
+          "$ref": "#/definitions/SlaState"
+        }
+      }
+    },
+    "SlaState": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "$ref": "#/definitions/SlaStatus"
+        },
+        "duration_value": {
+          "type": "integer"
+        },
+        "duration_unit": {
+          "$ref": "#/definitions/SlaDurationUnit"
+        }
+      }
+    },
+    "Log": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "journal-service-name": {
+          "type": "string"
+        }
+      }
+    },
+    "EventLog": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "journal-service-name": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      }
+    },
+    "Trigger": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "rule": {
+          "type": "string"
+        }
+      }
+    },
+    "B3Status": {
+      "type": "string",
+      "enum": [
+        "INITIATED",
+        "CANCELLED",
+        "ACCEPTED",
+        "STARTED",
+        "RUNNING",
+        "DATA_WAITING",
+        "EVENT_WAITING",
+        "PAUSED",
+        "POSITIVE_ENDING",
+        "NEUTRAL_ENDING",
+        "NEGATIVE_ENDING",
+        "SKIPPED",
+        "IS_ROLLING_BACK",
+        "HAS_ROLLED_BACK",
+        "FAULT",
+        "HOLD"
+      ]
+    },
+    "ActionPhases": {
+      "type": "string",
+      "enum": [
+        "INITIATED",
+        "CHANGE_BUSINESS_STAGE",
+        "CHECK_IN",
+        "START",
+        "BUSINESS_COMPLETE",
+        "ACTIVITY_COMPLETE",
+        "COMPLETE_FAILURE"
+      ]
+    },
+    "SlaStatus": {
+      "type": "string",
+      "enum": [
+        "INIT",
+        "STARTED",
+        "RE_ESTIMATED",
+        "EXPIRED"
+      ]
+    },
+    "ContextCodes": {
+      "type": "string",
+      "enum": [
+        "PSPLUS",
+        "C7M",
+        "VRKLDS",
+        "OFZHN",
+        "FZHN",
+        "OGRNT",
+        "GA_NPA",
+        "REDZONE",
+        "CHANGE",
+        "LEASING"
+      ]
+    },
+    "SlaDurationUnit": {
+      "type": "string",
+      "enum": [
+        "DAYS",
+        "WORKING_DAYS",
+        "HOURS",
+        "WORKING_HOURS",
+        "MINUTES",
+        "SECONDS"
+      ]
+    }
+  }
+}
