@@ -3,7 +3,7 @@ package com.sber.yamlprocessor.importer
 import org.junit.jupiter.api.Test
 import org.mockito.BDDMockito.given
 import org.mockito.ArgumentMatchers.anyList
-import org.mockito.ArgumentMatchers.eq
+import org.mockito.ArgumentMatchers
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.boot.test.mock.mockito.MockBean
@@ -12,6 +12,9 @@ import org.springframework.mock.web.MockMultipartFile
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.multipart
 import java.util.UUID
+
+@Suppress("UNCHECKED_CAST")
+private fun <T> eq(value: T): T = ArgumentMatchers.eq(value) ?: value
 
 @WebMvcTest(ProcessConfigurationImportController::class)
 class ProcessConfigurationImportControllerTest {
@@ -47,9 +50,9 @@ class ProcessConfigurationImportControllerTest {
             status { isOk() }
             content { contentType(MediaType.APPLICATION_JSON) }
             jsonPath("$.imported[0].filename") { value("process.yaml") }
-            jsonPath("$.imported[0].processConfigId") { value(processConfigId.toString()) }
-            jsonPath("$.imported[0].processId") { value(processId.toString()) }
-            jsonPath("$.imported[0].contextCode") { value("PSPLUS") }
+            jsonPath("$.imported[0].process_config_id") { value(processConfigId.toString()) }
+            jsonPath("$.imported[0].process_id") { value(processId.toString()) }
+            jsonPath("$.imported[0].context_code") { value("PSPLUS") }
         }
     }
 }
