@@ -1,7 +1,7 @@
 databaseChangeLog:
   - changeSet:
       id: 002-dictionary-tables
-      author: Codex
+      author: Talaika Pavel
       changes:
         - createTable:
             tableName: dict_b3_status
@@ -53,18 +53,6 @@ databaseChangeLog:
             baseTableName: process
             baseColumnNames: context_code
             constraintName: fk_process_context_code_dict
-            referencedTableName: dict_context_codes
-            referencedColumnNames: code
-        - addForeignKeyConstraint:
-            baseTableName: subprocess
-            baseColumnNames: context_code
-            constraintName: fk_subprocess_context_code_dict
-            referencedTableName: dict_context_codes
-            referencedColumnNames: code
-        - addForeignKeyConstraint:
-            baseTableName: stage
-            baseColumnNames: context_code
-            constraintName: fk_stage_context_code_dict
             referencedTableName: dict_context_codes
             referencedColumnNames: code
         - addForeignKeyConstraint:
@@ -264,3 +252,18 @@ databaseChangeLog:
             tableName: dict_sla_duration_unit
             columns:
               - column: { name: code, value: SECONDS }
+
+  - changeSet:
+      id: 003-add-initiated-action-phase
+      author: Talaika Pavel
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          sqlCheck:
+            expectedResult: "1"
+            sql: "select count(*) from dict_action_phases where code = 'INITIATED'"
+      changes:
+        - insert:
+            tableName: dict_action_phases
+            columns:
+              - column: { name: code, value: INITIATED }

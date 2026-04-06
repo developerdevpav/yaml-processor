@@ -13,6 +13,7 @@ import com.sber.yamlprocessor.model.ReverseOutput
 import com.sber.yamlprocessor.model.Stage
 import com.sber.yamlprocessor.model.Subprocess
 import com.sber.yamlprocessor.model.Configurator
+import com.sber.yamlprocessor.model.DictionaryEntity
 import graphql.schema.idl.RuntimeWiring
 import jakarta.persistence.ElementCollection
 import jakarta.persistence.Embeddable
@@ -28,6 +29,7 @@ import jakarta.persistence.metamodel.EntityType
 import jakarta.persistence.metamodel.PluralAttribute
 import org.hibernate.Hibernate
 import org.hibernate.annotations.Immutable
+import org.slf4j.LoggerFactory
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.core.io.ByteArrayResource
@@ -39,6 +41,7 @@ import org.springframework.transaction.annotation.Transactional
 import java.text.Normalizer
 import java.lang.reflect.Field
 import java.lang.reflect.Member
+import java.lang.reflect.Method
 import java.lang.reflect.Modifier
 import java.nio.charset.StandardCharsets
 import java.util.Collections
@@ -83,6 +86,7 @@ class JpaGraphQlSchemaFactory(
             } + listOf(
                 "  createSubprocessNode(processId: ID!, input: SubprocessInput!): Subprocess!",
                 "  updateSubprocessNode(id: ID!, input: SubprocessInput!): Subprocess!",
+                "  reorderSubprocessStages(subprocessId: ID!, stageIds: [ID!]!): Subprocess!",
                 "  deleteSubprocessNode(id: ID!): Boolean!",
                 "  createStageNode(subprocessId: ID!, input: StageInput!): Stage!",
                 "  updateStageNode(id: ID!, input: StageInput!): Stage!",
@@ -204,6 +208,12 @@ class JpaGraphQlRuntimeWiringConfigurer(
                 @Suppress("UNCHECKED_CAST")
                 service.updateSubprocessNode(env.getArgument("id"), env.getArgument<Map<String, Any?>>("input"))
             }
+            type.dataFetcher("reorderSubprocessStages") { env ->
+                service.reorderSubprocessStages(
+                    env.getArgument("subprocessId"),
+                    env.getArgument<List<Any?>>("stageIds")
+                )
+            }
             type.dataFetcher("deleteSubprocessNode") { env ->
                 service.deleteSubprocessNode(env.getArgument("id"))
             }
@@ -273,6 +283,8 @@ class JpaGraphQlCrudService(
     private val objectMapper: ObjectMapper,
     private val registry: JpaGraphQlRegistry
 ) {
+    private val logger = LoggerFactory.getLogger(JpaGraphQlCrudService::class.java)
+
     @Transactional(readOnly = true)
     fun findProcessConfigForExport(id: Any?): ProcessConfig {
         val entity = registry.entity(ProcessConfig::class.java)
@@ -298,6 +310,7 @@ class JpaGraphQlCrudService(
     @Transactional
     fun create(entity: EntityMetadata, input: Map<String, Any?>): Any {
         val instance = objectMapper.convertValue(input, entity.javaType)
+        coerceReferenceFields(instance, input, entity)
         sanitize(instance, entity)
         entityManager.persist(instance)
         entityManager.flush()
@@ -311,6 +324,7 @@ class JpaGraphQlCrudService(
         val current = entityManager.find(entity.javaType, entityId)
             ?: error("${entity.name} with id=$entityId not found")
         val instance = objectMapper.convertValue(input, entity.javaType)
+        coerceReferenceFields(instance, input, entity)
         setFieldValue(instance, entity.idField.name, entityId)
         alignChildIdentifiers(current, instance, entity)
         sanitize(instance, entity)
@@ -326,15 +340,65 @@ class JpaGraphQlCrudService(
         val entityId = convertId(id, entity.idJavaType)
         val current = entityManager.find(Stage::class.java, entityId)
             ?: error("Stage with id=$entityId not found")
-        val incoming = objectMapper.convertValue(input, Stage::class.java)
+        logger.info(
+            "updateStageNode start: stageId={}, currentConfiguratorId={}, currentSubprocessId={}, input={}",
+            entityId,
+            current.configurator?.id,
+            current.subprocess?.id,
+            safeJson(input)
+        )
+        if (input.containsKey("executor")) {
+            current.executor = input["executor"]?.toString() ?: ""
+        }
+        if (input.containsKey("nodeName")) {
+            current.nodeName = input["nodeName"]?.toString()?.ifBlank { null }
+        }
+        if (input.containsKey("nodeComment")) {
+            current.nodeComment = input["nodeComment"]?.toString()?.ifBlank { null }
+        }
+        if (input.containsKey("log")) {
+            @Suppress("UNCHECKED_CAST")
+            val logInput = input["log"] as Map<String, Any?>?
+            current.log = (current.log ?: com.sber.yamlprocessor.model.Log()).apply {
+                journalServiceName = logInput?.get("journalServiceName")?.toString()?.ifBlank { null }
+            }
+        }
+        logger.info(
+            "updateStageNode mapped: stageId={}, incomingExecutor={}, incomingNodeName={}, incomingNodeComment={}, incomingConfiguratorId={}",
+            entityId,
+            current.executor,
+            current.nodeName,
+            current.nodeComment,
+            current.configurator?.id
+        )
 
-        setFieldValue(incoming, entity.idField.name, entityId)
-        incoming.subprocess = current.subprocess
-        alignChildIdentifiers(current, incoming, entity)
-        sanitize(incoming, entity)
+        sanitize(current, entity)
 
-        val merged = entityManager.merge(incoming)
-        entityManager.flush()
+        val merged = entityManager.merge(current)
+        try {
+            entityManager.flush()
+        } catch (exception: Exception) {
+            logger.error(
+                "updateStageNode flush failed: stageId={}, mergedConfiguratorId={}, mergedSubprocessId={}, mergedNodeName={}, mergedNodeComment={}, mergedExecutor={}",
+                entityId,
+                merged.configurator?.id,
+                merged.subprocess?.id,
+                merged.nodeName,
+                merged.nodeComment,
+                merged.executor,
+                exception
+            )
+            throw exception
+        }
+        logger.info(
+            "updateStageNode success: stageId={}, persistedConfiguratorId={}, persistedSubprocessId={}, persistedNodeName={}, persistedNodeComment={}, persistedExecutor={}",
+            entityId,
+            merged.configurator?.id,
+            merged.subprocess?.id,
+            merged.nodeName,
+            merged.nodeComment,
+            merged.executor
+        )
         initializeGraph(merged, entity)
         return merged as Stage
     }
@@ -346,6 +410,7 @@ class JpaGraphQlCrudService(
             ?: error("Process with id=$parentId not found")
         val entity = registry.entity(Subprocess::class.java)
         val subprocess = objectMapper.convertValue(input, Subprocess::class.java)
+        coerceReferenceFields(subprocess, input, entity)
         subprocess.process = process
         sanitize(subprocess, entity)
         process.subprocess.add(subprocess)
@@ -374,21 +439,41 @@ class JpaGraphQlCrudService(
             current.disabled = input["disabled"] as? Boolean ?: false
         }
 
-        if (input.containsKey("contextCode")) {
-            @Suppress("UNCHECKED_CAST")
-            val contextInput = input["contextCode"] as Map<String, Any?>?
-            val contextCode = contextInput?.get("code")?.toString()?.trim().orEmpty()
-            current.contextCode = if (contextCode.isBlank()) {
-                null
-            } else {
-                entityManager.getReference(ContextCodesDictionary::class.java, contextCode)
-            }
-        }
-
         if (input.containsKey("trigger")) {
             @Suppress("UNCHECKED_CAST")
             val triggerInput = input["trigger"] as Map<String, Any?>?
             current.trigger.rule = triggerInput?.get("rule")?.toString() ?: ""
+        }
+
+        entityManager.flush()
+        initializeGraph(current, entity)
+        return current
+    }
+
+    @Transactional
+    fun reorderSubprocessStages(subprocessId: Any?, stageIds: List<Any?>): Subprocess {
+        val entity = registry.entity(Subprocess::class.java)
+        val entityId = convertId(subprocessId, entity.idJavaType)
+        val current = entityManager.find(Subprocess::class.java, entityId)
+            ?: error("Subprocess with id=$entityId not found")
+
+        val currentStages = current.stages.toList()
+        val currentStageIds = currentStages.mapNotNull { it.id }
+        val requestedStageIds = stageIds.map { convertId(it, UUID::class.java) as UUID }
+
+        require(requestedStageIds.size == currentStages.size) {
+            "Expected ${currentStages.size} stage ids for subprocess $entityId, got ${requestedStageIds.size}"
+        }
+        require(requestedStageIds.distinct().size == requestedStageIds.size) {
+            "Stage ids for subprocess $entityId must be unique"
+        }
+        require(currentStageIds.toSet() == requestedStageIds.toSet()) {
+            "Stage ids do not match subprocess $entityId current stages"
+        }
+
+        val stageById = currentStages.associateBy { it.id }
+        requestedStageIds.forEachIndexed { index, stageId ->
+            current.stages[index] = stageById.getValue(stageId)
         }
 
         entityManager.flush()
@@ -412,6 +497,7 @@ class JpaGraphQlCrudService(
             ?: error("Subprocess with id=$parentId not found")
         val entity = registry.entity(Stage::class.java)
         val stage = objectMapper.convertValue(input, Stage::class.java)
+        coerceReferenceFields(stage, input, entity)
         stage.subprocess = subprocess
         sanitize(stage, entity)
         subprocess.stages.add(stage)
@@ -470,6 +556,7 @@ class JpaGraphQlCrudService(
 
         val entity = registry.entity(Configurator::class.java)
         val configurator = objectMapper.convertValue(input, Configurator::class.java)
+        coerceReferenceFields(configurator, input, entity)
         configurator.stage = stage
         sanitize(configurator, entity)
         entityManager.persist(configurator)
@@ -485,13 +572,61 @@ class JpaGraphQlCrudService(
         val entityId = convertId(id, entity.idJavaType)
         val current = entityManager.find(Configurator::class.java, entityId)
             ?: error("Configurator with id=$entityId not found")
-        val incoming = objectMapper.convertValue(input, Configurator::class.java)
-        setFieldValue(incoming, entity.idField.name, entityId)
-        incoming.stage = current.stage
-        alignChildIdentifiers(current, incoming, entity)
-        sanitize(incoming, entity)
-        val merged = entityManager.merge(incoming)
-        entityManager.flush()
+        logger.info(
+            "updateConfiguratorNode start: configuratorId={}, currentStageId={}, input={}",
+            entityId,
+            current.stage?.id,
+            safeJson(input)
+        )
+        if (input.containsKey("disabled")) {
+            current.disabled = input["disabled"] as? Boolean ?: false
+        }
+        if (input.containsKey("interrupted")) {
+            current.interrupted = input["interrupted"] as? Boolean ?: true
+        }
+        if (input.containsKey("multiple")) {
+            current.multiple = input["multiple"] as? Boolean ?: false
+        }
+        if (input.containsKey("filterEventRule")) {
+            current.filterEventRule = input["filterEventRule"]?.toString() ?: ""
+        }
+        if (input.containsKey("audit")) {
+            @Suppress("UNCHECKED_CAST")
+            val auditInput = input["audit"] as Map<String, Any?>?
+            current.audit = (current.audit ?: com.sber.yamlprocessor.model.Audit()).apply {
+                enabled = auditInput?.get("enabled") as? Boolean ?: false
+                eventCode = auditInput?.get("eventCode")?.toString()?.ifBlank { null }
+                eventDescription = auditInput?.get("eventDescription")?.toString()?.ifBlank { null }
+            }
+        }
+        sanitize(current, entity)
+        val merged = entityManager.merge(current)
+        try {
+            entityManager.flush()
+        } catch (exception: Exception) {
+            logger.error(
+                "updateConfiguratorNode flush failed: configuratorId={}, stageId={}, disabled={}, interrupted={}, multiple={}, auditEnabled={}, filterEventRuleLength={}",
+                entityId,
+                merged.stage?.id,
+                merged.disabled,
+                merged.interrupted,
+                merged.multiple,
+                merged.audit?.enabled,
+                merged.filterEventRule?.length ?: 0,
+                exception
+            )
+            throw exception
+        }
+        logger.info(
+            "updateConfiguratorNode success: configuratorId={}, stageId={}, disabled={}, interrupted={}, multiple={}, auditEnabled={}, filterEventRuleLength={}",
+            entityId,
+            merged.stage?.id,
+            merged.disabled,
+            merged.interrupted,
+            merged.multiple,
+            merged.audit?.enabled,
+            merged.filterEventRule?.length ?: 0
+        )
         initializeGraph(merged, entity)
         return merged as Configurator
     }
@@ -513,6 +648,7 @@ class JpaGraphQlCrudService(
             ?: error("Configurator with id=$parentId not found")
         val entity = registry.entity(Result::class.java)
         val result = objectMapper.convertValue(input, Result::class.java)
+        coerceReferenceFields(result, input, entity)
         result.configurator = configurator
         sanitize(result, entity)
         configurator.result.add(result)
@@ -529,6 +665,7 @@ class JpaGraphQlCrudService(
         val current = entityManager.find(Result::class.java, entityId)
             ?: error("Result with id=$entityId not found")
         val incoming = objectMapper.convertValue(input, Result::class.java)
+        coerceReferenceFields(incoming, input, entity)
         setFieldValue(incoming, entity.idField.name, entityId)
         incoming.configurator = current.configurator
         alignChildIdentifiers(current, incoming, entity)
@@ -555,6 +692,7 @@ class JpaGraphQlCrudService(
             ?: error("Result with id=$parentId not found")
         val entity = registry.entity(Reverse::class.java)
         val reverse = objectMapper.convertValue(input, Reverse::class.java)
+        coerceReferenceFields(reverse, input, entity)
         reverse.result = result
         sanitize(reverse, entity)
         result.reverse.add(reverse)
@@ -571,6 +709,7 @@ class JpaGraphQlCrudService(
         val current = entityManager.find(Reverse::class.java, entityId)
             ?: error("Reverse with id=$entityId not found")
         val incoming = objectMapper.convertValue(input, Reverse::class.java)
+        coerceReferenceFields(incoming, input, entity)
         setFieldValue(incoming, entity.idField.name, entityId)
         incoming.result = current.result
         alignChildIdentifiers(current, incoming, entity)
@@ -597,6 +736,7 @@ class JpaGraphQlCrudService(
             ?: error("Reverse with id=$parentId not found")
         val entity = registry.entity(ReverseOutput::class.java)
         val output = objectMapper.convertValue(input, ReverseOutput::class.java)
+        coerceReferenceFields(output, input, entity)
         output.reverse = reverse
         sanitize(output, entity)
         reverse.output.add(output)
@@ -613,6 +753,7 @@ class JpaGraphQlCrudService(
         val current = entityManager.find(ReverseOutput::class.java, entityId)
             ?: error("ReverseOutput with id=$entityId not found")
         val incoming = objectMapper.convertValue(input, ReverseOutput::class.java)
+        coerceReferenceFields(incoming, input, entity)
         setFieldValue(incoming, entity.idField.name, entityId)
         incoming.reverse = current.reverse
         alignChildIdentifiers(current, incoming, entity)
@@ -651,7 +792,9 @@ class JpaGraphQlCrudService(
                 FieldKind.SCALAR, FieldKind.SCALAR_COLLECTION -> Unit
                 FieldKind.EMBEDDED -> sanitize(current, registry.complexType(field.targetClass))
                 FieldKind.ENTITY_REFERENCE -> {
-                    val target = registry.entity(field.targetClass)
+                    val referenceField = findField(value.javaClass, field.name)
+                    val referenceJavaType = referenceField.type
+                    val target = registry.entity(referenceJavaType)
                     val refId = getFieldValue(current, target.idField.name)
                     if (refId == null) {
                         if (isInMemoryBackReference(current, value, target)) {
@@ -659,7 +802,12 @@ class JpaGraphQlCrudService(
                         }
                         error("Reference ${field.name} must include ${target.idField.name}")
                     }
-                    setFieldValue(value, field.name, entityManager.getReference(target.javaType, convertId(refId, target.idJavaType)))
+                    val normalizedReference = if (DictionaryEntity::class.java.isAssignableFrom(referenceJavaType)) {
+                        instantiateDictionaryReference(referenceJavaType, refId)
+                    } else {
+                        instantiateReference(target, convertId(refId, target.idJavaType))
+                    }
+                    setFieldValue(value, field.name, normalizedReference)
                 }
                 FieldKind.ENTITY_CHILD -> {
                     field.inverseField?.let { setFieldValue(current, it, value) }
@@ -670,6 +818,54 @@ class JpaGraphQlCrudService(
                     (current as Iterable<Any>).forEach { child ->
                         field.inverseField?.let { setFieldValue(child, it, value) }
                         sanitize(child, registry.entity(field.targetClass))
+                    }
+                }
+            }
+        }
+    }
+
+    private fun coerceReferenceFields(value: Any?, input: Map<String, Any?>, type: ComplexTypeMetadata) {
+        if (value == null) {
+            return
+        }
+
+        type.fields.forEach { field ->
+            val rawFieldValue = input[field.name] ?: return@forEach
+            when (field.kind) {
+                FieldKind.SCALAR, FieldKind.SCALAR_COLLECTION -> Unit
+                FieldKind.EMBEDDED -> {
+                    val current = getFieldValue(value, field.name) ?: return@forEach
+                    @Suppress("UNCHECKED_CAST")
+                    val nestedInput = rawFieldValue as? Map<String, Any?> ?: return@forEach
+                    coerceReferenceFields(current, nestedInput, registry.complexType(field.targetClass))
+                }
+                FieldKind.ENTITY_REFERENCE -> {
+                    @Suppress("UNCHECKED_CAST")
+                    val refInput = rawFieldValue as? Map<String, Any?> ?: return@forEach
+                    val referenceField = findField(value.javaClass, field.name)
+                    val referenceJavaType = referenceField.type
+                    val target = registry.entity(referenceJavaType)
+                    val refId = refInput[target.idField.name] ?: return@forEach
+                    val normalizedReference = if (DictionaryEntity::class.java.isAssignableFrom(referenceJavaType)) {
+                        instantiateDictionaryReference(referenceJavaType, refId)
+                    } else {
+                        instantiateReference(target, convertId(refId, target.idJavaType))
+                    }
+                    setFieldValue(value, field.name, normalizedReference)
+                }
+                FieldKind.ENTITY_CHILD -> {
+                    val current = getFieldValue(value, field.name) ?: return@forEach
+                    @Suppress("UNCHECKED_CAST")
+                    val nestedInput = rawFieldValue as? Map<String, Any?> ?: return@forEach
+                    coerceReferenceFields(current, nestedInput, registry.entity(field.targetClass))
+                }
+                FieldKind.ENTITY_CHILD_COLLECTION -> {
+                    @Suppress("UNCHECKED_CAST")
+                    val currentItems = (getFieldValue(value, field.name) as? Iterable<Any>)?.toList() ?: return@forEach
+                    @Suppress("UNCHECKED_CAST")
+                    val nestedInputs = rawFieldValue as? List<Map<String, Any?>> ?: return@forEach
+                    currentItems.zip(nestedInputs).forEach { (child, childInput) ->
+                        coerceReferenceFields(child, childInput, registry.entity(field.targetClass))
                     }
                 }
             }
@@ -786,6 +982,10 @@ class JpaGraphQlCrudService(
             else -> raw.toString()
         }
     }
+
+    private fun safeJson(value: Any?): String =
+        runCatching { objectMapper.writeValueAsString(value) }
+            .getOrElse { "<unserializable: ${it.javaClass.simpleName}>" }
 }
 
 data class ProcessConfigurationExport(
@@ -937,9 +1137,13 @@ class JpaGraphQlRegistry(
         val member = attribute.javaMember
         val fieldName = attribute.name
         val isId = hasAnnotation(member, Id::class.java)
-        val targetJavaType = when (attribute) {
+        val metamodelJavaType = when (attribute) {
             is PluralAttribute<*, *, *> -> attribute.elementType.javaType
             else -> attribute.javaType
+        }
+        val targetJavaType = when (attribute) {
+            is PluralAttribute<*, *, *> -> metamodelJavaType
+            else -> declaredJavaType(member, metamodelJavaType)
         }
 
         if (isId) {
@@ -1099,6 +1303,12 @@ class JpaGraphQlRegistry(
             }
             ?.name
 
+    private fun declaredJavaType(member: Member, fallback: Class<*>): Class<*> = when (member) {
+        is Field -> member.type
+        is Method -> member.returnType
+        else -> fallback
+    }
+
     private fun graphQlScalar(javaType: Class<*>): String = when (javaType) {
         Boolean::class.java, Boolean::class.javaPrimitiveType -> "Boolean"
         Int::class.java, Int::class.javaPrimitiveType,
@@ -1189,6 +1399,18 @@ private fun setFieldValue(target: Any, fieldName: String, value: Any?) {
     val field = findField(target.javaClass, fieldName)
     field.isAccessible = true
     field.set(target, value)
+}
+
+private fun instantiateReference(target: EntityMetadata, id: Any): Any {
+    val instance = target.javaType.getDeclaredConstructor().newInstance()
+    setFieldValue(instance, target.idField.name, id)
+    return instance
+}
+
+private fun instantiateDictionaryReference(referenceJavaType: Class<*>, code: Any): Any {
+    val instance = referenceJavaType.getDeclaredConstructor().newInstance()
+    setFieldValue(instance, "code", code.toString())
+    return instance
 }
 
 private fun findField(javaType: Class<*>, fieldName: String): Field {

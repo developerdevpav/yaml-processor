@@ -27,12 +27,6 @@ class ReverseOutput(
     @Column(name = "rule", length = 4000)
     var rule: String? = null,
 
-    @Column(name = "node_name", length = 255)
-    var nodeName: String? = null,
-
-    @Column(name = "node_comment", length = 4000)
-    var nodeComment: String? = null,
-
     @Embedded
     var body: Body = Body(),
 

@@ -1,12 +1,10 @@
 package com.sber.yamlprocessor.model
 
 import com.fasterxml.jackson.annotation.JsonIgnore
-import com.fasterxml.jackson.annotation.JsonProperty
 import jakarta.persistence.CascadeType
 import jakarta.persistence.Column
 import jakarta.persistence.Embedded
 import jakarta.persistence.Entity
-import jakarta.persistence.FetchType
 import jakarta.persistence.JoinColumn
 import jakarta.persistence.ManyToOne
 import jakarta.persistence.OneToOne
@@ -25,14 +23,6 @@ class Stage(
 
     @Embedded
     var log: Log? = null,
-
-    @ManyToOne(fetch = FetchType.EAGER)
-    @JoinColumn(name = "context_code", referencedColumnName = "code")
-    @field:JsonProperty("context-code")
-    var contextCode: ContextCodesDictionary? = null,
-
-    @Column(name = "description", nullable = false, length = 4000)
-    var description: String = "",
 
     @Column(name = "node_name", length = 255)
     var nodeName: String? = null,

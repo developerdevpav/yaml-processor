@@ -1,5 +1,6 @@
 package com.sber.yamlprocessor.model
 
+import com.fasterxml.jackson.annotation.JsonAlias
 import com.fasterxml.jackson.annotation.JsonProperty
 import jakarta.persistence.AssociationOverride
 import jakarta.persistence.AssociationOverrides
@@ -18,10 +19,12 @@ class Audit(
     var enabled: Boolean = false,
 
     @Column(name = "audit_event_code")
+    @field:JsonAlias("eventCode")
     @field:JsonProperty("event-code")
     var eventCode: String? = null,
 
     @Column(name = "audit_event_description")
+    @field:JsonAlias("eventDescription")
     @field:JsonProperty("event-description")
     var eventDescription: String? = null
 )
@@ -29,6 +32,7 @@ class Audit(
 @Embeddable
 class Log(
     @Column(name = "stage_log_journal_service_name")
+    @field:JsonAlias("journalServiceName")
     @field:JsonProperty("journal-service-name")
     var journalServiceName: String? = null
 )
@@ -36,6 +40,7 @@ class Log(
 @Embeddable
 class EventLog(
     @Column(name = "rev_out_journal_service_name")
+    @field:JsonAlias("journalServiceName")
     @field:JsonProperty("journal-service-name")
     var journalServiceName: String = "",
 
@@ -87,6 +92,7 @@ class Body(
     @AttributeOverrides(
         AttributeOverride(name = "type", column = Column(name = "body_event_object_type"))
     )
+    @field:JsonAlias("eventObject")
     @field:JsonProperty("event-object")
     var eventObject: EventObject? = null,
 

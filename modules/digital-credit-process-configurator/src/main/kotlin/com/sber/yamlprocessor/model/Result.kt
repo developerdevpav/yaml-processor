@@ -1,6 +1,7 @@
 package com.sber.yamlprocessor.model
 
 import com.fasterxml.jackson.annotation.JsonIgnore
+import com.fasterxml.jackson.annotation.JsonAlias
 import com.fasterxml.jackson.annotation.JsonProperty
 import jakarta.persistence.CascadeType
 import jakarta.persistence.CollectionTable
@@ -26,14 +27,9 @@ class Result(
     @CollectionTable(name = "result_input_scenario", joinColumns = [JoinColumn(name = "result_id")])
     @Column(name = "scenario", length = 2000)
     @OrderColumn(name = "scenario_sort")
+    @field:JsonAlias("inputScenarios")
     @field:JsonProperty("input-scenarios")
     var inputScenarios: MutableList<String> = mutableListOf(),
-
-    @Column(name = "node_name", length = 255)
-    var nodeName: String? = null,
-
-    @Column(name = "node_comment", length = 4000)
-    var nodeComment: String? = null,
 
     @OneToMany(mappedBy = "result", cascade = [CascadeType.ALL], orphanRemoval = true)
     @OrderColumn(name = "reverse_sort")

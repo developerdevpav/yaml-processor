@@ -1,17 +1,51 @@
 import { gql, useMutation, useQuery } from '@apollo/client';
-import { CheckVerified02, Edit01, Plus, Rows01, Trash01, XCircle, XClose } from '@untitledui/icons';
+import { AlertCircle, Bell01, CheckVerified02, Edit01, Eye, Plus, Rows01, Send03, Trash01, XCircle, XClose } from '@untitledui/icons';
 import { useEffect, useRef, useState } from 'react';
 import ReactFlow, {
   Controls,
   Handle,
-  MarkerType,
   Position,
   ReactFlowProvider,
+  useReactFlow,
 } from 'reactflow';
 import { ProcessSelectField } from './components/ProcessSelectField';
 
 function cn(...values) {
   return values.filter(Boolean).join(' ');
+}
+
+function getFilenameFromContentDisposition(headerValue) {
+  if (!headerValue) {
+    return '';
+  }
+
+  const utf8Match = headerValue.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8Match?.[1]) {
+    return decodeURIComponent(utf8Match[1]);
+  }
+
+  const quotedMatch = headerValue.match(/filename="([^"]+)"/i);
+  if (quotedMatch?.[1]) {
+    return quotedMatch[1];
+  }
+
+  const plainMatch = headerValue.match(/filename=([^;]+)/i);
+  return plainMatch?.[1]?.trim() ?? '';
+}
+
+function downloadBlob(blob, filename) {
+  const objectUrl = window.URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = objectUrl;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.URL.revokeObjectURL(objectUrl);
+}
+
+function formatAutosaveCountdownLabel(secondsLeft) {
+  return `Автосохранение через ${Math.max(1, Math.ceil(secondsLeft))} c`;
 }
 
 function Page({ children }) {
@@ -104,20 +138,12 @@ function Button({
   );
 }
 
-function Alert({ title, className = '', variant = 'danger' }) {
-  const variantClassName =
-    variant === 'danger'
-      ? 'border-rose-200 bg-rose-50 text-rose-700'
-      : 'border-slate-200 bg-slate-50 text-slate-700';
-
-  return <div className={cn('rounded-2xl border px-4 py-3 text-sm', variantClassName, className)}>{title}</div>;
-}
-
-function Toast({ title, message, onClose }) {
+function Toast({ title, message, onClose, variant = 'success' }) {
+  const isError = variant === 'error';
   return (
-    <div className="app-toast" role="status" aria-live="polite">
-      <div className="app-toast__icon">
-        <CheckVerified02 aria-hidden size={18} />
+    <div className={cn('app-toast', isError && 'app-toast-error')} role={isError ? 'alert' : 'status'} aria-live="polite">
+      <div className={cn('app-toast__icon', isError && 'app-toast__icon-error')}>
+        {isError ? <AlertCircle aria-hidden size={18} /> : <CheckVerified02 aria-hidden size={18} />}
       </div>
       <div className="app-toast__content">
         <div className="app-toast__title">{title}</div>
@@ -151,6 +177,24 @@ function Text({ children, component = 'p', className = '' }) {
   const Component = component;
   const baseClassName = component === 'small' ? 'text-sm text-slate-500' : 'text-base text-slate-600';
   return <Component className={cn(baseClassName, className)}>{children}</Component>;
+}
+
+function StaticField({ label, value, className = '' }) {
+  return (
+    <div className={cn('static-field', className)}>
+      <div className="static-field__label">{label}</div>
+      <div className="static-field__value">{value ?? '—'}</div>
+    </div>
+  );
+}
+
+function StaticJsonField({ label, value, className = '' }) {
+  return (
+    <div className={cn('static-field', className)}>
+      <div className="static-field__label">{label}</div>
+      <pre className="static-field__code">{formatJsonSnippet(value ?? '')}</pre>
+    </div>
+  );
 }
 
 function Title({ children, headingLevel = 'h2', className = '' }) {
@@ -244,8 +288,6 @@ function Checkbox({ id, isChecked, onChange, label }) {
 const PROCESS_FIELDS = gql`
   fragment ReverseOutputFields on ReverseOutput {
     id
-    nodeName
-    nodeComment
     name
     rule
     phase {
@@ -278,8 +320,6 @@ const PROCESS_FIELDS = gql`
 
   fragment ReverseFields on Reverse {
     id
-    nodeName
-    nodeComment
     status {
       code
     }
@@ -290,8 +330,6 @@ const PROCESS_FIELDS = gql`
 
   fragment ResultFields on Result {
     id
-    nodeName
-    nodeComment
     inputScenarios
     reverse {
       ...ReverseFields
@@ -319,10 +357,6 @@ const PROCESS_FIELDS = gql`
     nodeName
     nodeComment
     executor
-    description
-    contextCode {
-      code
-    }
     log {
       journalServiceName
     }
@@ -336,9 +370,6 @@ const PROCESS_FIELDS = gql`
     nodeName
     nodeComment
     disabled
-    contextCode {
-      code
-    }
     trigger {
       rule
     }
@@ -349,6 +380,12 @@ const PROCESS_FIELDS = gql`
 
   query ProcessConfigList {
     actionPhasesDictionaryList {
+      code
+    }
+    b3StatusDictionaryList {
+      code
+    }
+    slaDurationUnitDictionaryList {
       code
     }
     slaStatusDictionaryList {
@@ -392,9 +429,6 @@ const CREATE_PROCESS = gql`
           nodeName
           nodeComment
           disabled
-          contextCode {
-            code
-          }
           trigger {
             rule
           }
@@ -423,9 +457,25 @@ const UPDATE_STAGE_NODE = gql`
   }
 `;
 
+const UPDATE_CONFIGURATOR_NODE = gql`
+  mutation UpdateConfiguratorNode($id: ID!, $input: ConfiguratorInput!) {
+    updateConfiguratorNode(id: $id, input: $input) {
+      id
+    }
+  }
+`;
+
 const UPDATE_SUBPROCESS_NODE = gql`
   mutation UpdateSubprocessNode($id: ID!, $input: SubprocessInput!) {
     updateSubprocessNode(id: $id, input: $input) {
+      id
+    }
+  }
+`;
+
+const REORDER_SUBPROCESS_STAGES = gql`
+  mutation ReorderSubprocessStages($subprocessId: ID!, $stageIds: [ID!]!) {
+    reorderSubprocessStages(subprocessId: $subprocessId, stageIds: $stageIds) {
       id
     }
   }
@@ -440,6 +490,14 @@ const UPDATE_PROCESS_NODE = gql`
       contextCode {
         code
       }
+    }
+  }
+`;
+
+const CREATE_SUBPROCESS_NODE = gql`
+  mutation CreateSubprocessNode($processId: ID!, $input: SubprocessInput!) {
+    createSubprocessNode(processId: $processId, input: $input) {
+      id
     }
   }
 `;
@@ -507,6 +565,14 @@ const UPDATE_REVERSE_OUTPUT_NODE = gql`
 const DELETE_SUBPROCESS_NODE = gql`
   mutation DeleteSubprocessNode($id: ID!) {
     deleteSubprocessNode(id: $id)
+  }
+`;
+
+const CREATE_STAGE_NODE = gql`
+  mutation CreateStageNode($subprocessId: ID!, $input: StageInput!) {
+    createStageNode(subprocessId: $subprocessId, input: $input) {
+      id
+    }
   }
 `;
 
@@ -581,10 +647,16 @@ function updateItemAt(items, index, updater) {
   return items.map((item, itemIndex) => (itemIndex === index ? updater(item) : item));
 }
 
+function sanitizeInputScenarios(items) {
+  return (items ?? []).map((item) => item.trim()).filter(Boolean);
+}
+
+const NODE_NAME_HELPER_TEXT = 'Название узла нужно для визуальной идентификации на схеме и в редакторе.';
+const NODE_COMMENT_HELPER_TEXT = 'Описание узла помогает понять его назначение и отображается в карточке узла.';
+
 function createDefaultStage(index) {
   return {
     executor: `executor_${index}`,
-    description: '',
     nodeName: `stage_${index}`,
     nodeComment: 'добавьте комментарий',
     log: {
@@ -607,7 +679,25 @@ function createDefaultStage(index) {
 
 function getDefaultExpandedNodeIds(processConfig) {
   const processId = processConfig?.process?.id;
-  return processId ? [`process:${processId}`] : [];
+  if (!processId) {
+    return [];
+  }
+
+  const expandedNodeIds = [`process:${processId}`];
+  (processConfig.process?.subprocess ?? []).forEach((subprocess) => {
+    expandedNodeIds.push(`subprocess:${subprocess.id}`);
+    (subprocess.stages ?? []).forEach((stage) => {
+      expandedNodeIds.push(`stage:${stage.id}`);
+      (stage.configurator?.result ?? []).forEach((result, resultIndex) => {
+        expandedNodeIds.push(getResultNodeId(stage.id, resultIndex));
+        (result.reverse ?? []).forEach((reverse, reverseIndex) => {
+          expandedNodeIds.push(getReverseNodeId(stage.id, resultIndex, reverseIndex));
+        });
+      });
+    });
+  });
+
+  return expandedNodeIds;
 }
 
 function createDefaultSubprocess(index) {
@@ -629,6 +719,35 @@ function refInput(value) {
 function normalizeReferenceDraft(value) {
   const code = value?.code?.trim();
   return code ? { code } : null;
+}
+
+function normalizeNullableInteger(value) {
+  if (value == null || value === '') {
+    return null;
+  }
+
+  const normalized = typeof value === 'number' ? value : Number.parseInt(String(value), 10);
+  return Number.isFinite(normalized) ? normalized : null;
+}
+
+function serializeSlaState(sla) {
+  if (!sla) {
+    return null;
+  }
+
+  const durationValue = normalizeNullableInteger(sla.durationValue);
+  const durationUnit = refInput(sla.durationUnit);
+  const status = refInput(sla.status);
+
+  if (durationValue == null && !durationUnit && !status) {
+    return null;
+  }
+
+  return {
+    durationValue,
+    durationUnit,
+    status,
+  };
 }
 
 function stripTypename(value) {
@@ -689,18 +808,12 @@ function serializeConfigurator(configurator) {
       : null,
     result: (configurator.result ?? []).map((result) => ({
       id: result.id ?? undefined,
-      nodeName: result.nodeName ?? '',
-      nodeComment: result.nodeComment ?? '',
       inputScenarios: result.inputScenarios ?? [],
       reverse: (result.reverse ?? []).map((reverse) => ({
         id: reverse.id ?? undefined,
-        nodeName: reverse.nodeName ?? '',
-        nodeComment: reverse.nodeComment ?? '',
         status: refInput(reverse.status),
         output: (reverse.output ?? []).map((output) => ({
           id: output.id ?? undefined,
-          nodeName: output.nodeName ?? '',
-          nodeComment: output.nodeComment ?? '',
           phase: refInput(output.phase),
           name: output.name ?? '',
           rule: output.rule ?? '',
@@ -716,13 +829,7 @@ function serializeConfigurator(configurator) {
                   ? {
                       scenario: output.body.service.scenario ?? '',
                       status: output.body.service.status ?? '',
-                      sla: output.body.service.sla
-                        ? {
-                            durationValue: output.body.service.sla.durationValue ?? null,
-                            durationUnit: refInput(output.body.service.sla.durationUnit),
-                            status: refInput(output.body.service.sla.status),
-                          }
-                        : null,
+                      sla: serializeSlaState(output.body.service.sla),
                     }
                   : null,
               }
@@ -739,14 +846,34 @@ function serializeConfigurator(configurator) {
   };
 }
 
+function serializeStageConfigurator(configurator, filterEventRuleOverride = null) {
+  if (!configurator) {
+    return null;
+  }
+
+  return {
+    id: configurator.id ?? undefined,
+    disabled: configurator.disabled ?? false,
+    interrupted: configurator.interrupted ?? true,
+    multiple: configurator.multiple ?? false,
+    filterEventRule:
+      filterEventRuleOverride === null ? configurator.filterEventRule ?? '' : filterEventRuleOverride,
+    audit: configurator.audit
+      ? {
+          enabled: configurator.audit.enabled ?? false,
+          eventCode: configurator.audit.eventCode ?? '',
+          eventDescription: configurator.audit.eventDescription ?? '',
+        }
+      : null,
+  };
+}
+
 function serializeStage(stage) {
   return {
     id: stage.id ?? undefined,
     executor: stage.executor ?? '',
-    description: stage.description ?? '',
     nodeName: stage.nodeName ?? '',
     nodeComment: stage.nodeComment ?? '',
-    contextCode: refInput(stage.contextCode),
     log: stage.log
       ? {
           journalServiceName: stage.log.journalServiceName ?? '',
@@ -762,8 +889,6 @@ function serializeReverseOutput(output) {
     phase: refInput(output.phase),
     name: output.name ?? '',
     rule: output.rule ?? '',
-    nodeName: output.nodeName ?? '',
-    nodeComment: output.nodeComment ?? '',
     body: output.body
       ? {
           type: output.body.type ?? '',
@@ -776,13 +901,7 @@ function serializeReverseOutput(output) {
             ? {
                 scenario: output.body.service.scenario ?? '',
                 status: output.body.service.status ?? '',
-                sla: output.body.service.sla
-                  ? {
-                      durationValue: output.body.service.sla.durationValue ?? null,
-                      durationUnit: refInput(output.body.service.sla.durationUnit),
-                      status: refInput(output.body.service.sla.status),
-                    }
-                  : null,
+                sla: serializeSlaState(output.body.service.sla),
               }
             : null,
         }
@@ -805,7 +924,6 @@ function serializeSubprocess(subprocess) {
     nodeName: subprocess.nodeName ?? '',
     nodeComment: subprocess.nodeComment ?? '',
     disabled: subprocess.disabled ?? false,
-    contextCode: refInput(subprocess.contextCode),
     trigger: subprocess.trigger
       ? {
           rule: subprocess.trigger.rule ?? '',
@@ -832,15 +950,22 @@ function serializeProcessConfig(processConfig) {
   };
 }
 
-const TOPOLOGY_NODE_WIDTH = 300;
-const TOPOLOGY_NODE_HEIGHT = 136;
+const TOPOLOGY_NODE_WIDTH = 400;
+const TOPOLOGY_NODE_HEIGHT = 286;
+const TOPOLOGY_REVERSE_NODE_HEIGHT = 132;
+const TOPOLOGY_REVERSE_OUTPUT_NODE_HEIGHT = 358;
+const TOPOLOGY_RESULT_NODE_BASE_HEIGHT = 132;
+const TOPOLOGY_RESULT_SCENARIO_ITEM_HEIGHT = 58;
+const TOPOLOGY_TEXT_LINE_HEIGHT = 20;
+const TOPOLOGY_NODE_ACTION_CLEARANCE = 28;
 const TOPOLOGY_VERTICAL_GAP = 56;
 const TOPOLOGY_HORIZONTAL_GAP = 128;
-const NODE_AUTOSAVE_DELAY_MS = 5_000;
-const TOPOLOGY_TOP_PADDING = 32;
+const NODE_AUTOSAVE_DELAY_MS = 3_000;
+const TOPOLOGY_TOP_PADDING = 128;
 const TOPOLOGY_LEFT_PADDING = 48;
 const TOPOLOGY_TITLE_CHARS_PER_LINE = 20;
 const TOPOLOGY_SUBTITLE_CHARS_PER_LINE = 28;
+const TOPOLOGY_SUBTITLE_MAX_CHARS = 120;
 
 function getResultNodeId(stageId, resultIndex) {
   return `result:${stageId}:${resultIndex}`;
@@ -859,50 +984,77 @@ function createTopologyEdge(id, source, target, extra = {}) {
     id,
     source,
     target,
-    type: 'smoothstep',
-    pathOptions: {
-      borderRadius: 0,
-      offset: 24,
-    },
+    type: 'default',
     animated: false,
     selectable: false,
     focusable: false,
     deletable: false,
     interactionWidth: 0,
     style: {
-      stroke: '#1570ef',
-      strokeWidth: 2.25,
-    },
-    markerEnd: {
-      type: MarkerType.ArrowClosed,
-      width: 18,
-      height: 18,
-      color: '#1570ef',
+      stroke: '#98a2b3',
+      strokeWidth: 2,
     },
     ...extra,
   };
 }
 
-function estimateTextLines(value, charsPerLine, maxLines) {
-  const text = String(value ?? '').trim();
+function estimateNodeHeight({ title, subtitle, isExpandable }) {
+  return TOPOLOGY_NODE_HEIGHT;
+}
 
+function estimateTextLines(value, charsPerLine = TOPOLOGY_SUBTITLE_CHARS_PER_LINE) {
+  const text = String(value ?? '').trim();
   if (!text) {
     return 1;
   }
 
-  return Math.max(
-    1,
-    Math.min(
-      maxLines,
-      text.split(/\r?\n/).reduce((total, line) => {
-        return total + Math.max(1, Math.ceil(line.length / charsPerLine));
-      }, 0),
-    ),
+  return text
+    .split('\n')
+    .reduce((sum, line) => sum + Math.max(1, Math.ceil(line.trim().length / charsPerLine) || 1), 0);
+}
+
+function estimateReverseOutputNodeHeight({ summaryItems }) {
+  const summaryHeight = (summaryItems ?? []).reduce(
+    (sum, item) => sum + Math.max(20, estimateTextLines(item.value, 34) * 20),
+    0,
+  );
+  return Math.min(
+    TOPOLOGY_REVERSE_OUTPUT_NODE_HEIGHT,
+    Math.max(56, 20 + summaryHeight + Math.max(0, ((summaryItems?.length ?? 0) - 1) * 4)),
   );
 }
 
-function estimateNodeHeight({ title, subtitle, isExpandable }) {
-  return TOPOLOGY_NODE_HEIGHT;
+function estimateReverseNodeHeight(statusValue, isExpandable) {
+  const statusLines = estimateTextLines(statusValue, 24);
+  return Math.min(
+    TOPOLOGY_NODE_HEIGHT,
+    Math.max(110, 92 + statusLines * TOPOLOGY_TEXT_LINE_HEIGHT + (isExpandable ? 28 : 0)),
+  );
+}
+
+function estimateResultNodeHeight({ scenarios, isExpandable }) {
+  const normalizedScenarios = (scenarios?.length ? scenarios : ['']).map((scenario) => estimateTextLines(scenario, 32));
+  const contentHeight = normalizedScenarios.reduce(
+    (sum, lineCount) => sum + Math.max(40, lineCount * TOPOLOGY_TEXT_LINE_HEIGHT + 8),
+    0,
+  );
+  return Math.min(
+    TOPOLOGY_NODE_HEIGHT,
+    Math.max(120, 84 + contentHeight + (normalizedScenarios.length - 1) * 8 + (isExpandable ? 28 : 0)),
+  );
+}
+
+function getNodeFootprintHeight(nodeHeight) {
+  return nodeHeight + TOPOLOGY_NODE_ACTION_CLEARANCE;
+}
+
+function truncateText(value, maxChars = TOPOLOGY_SUBTITLE_MAX_CHARS) {
+  const text = String(value ?? '').trim();
+  if (!text || text.length <= maxChars) {
+    return text;
+  }
+
+  return `${text.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
 }
 
 function stackBranchHeight(items) {
@@ -913,29 +1065,46 @@ function stackBranchHeight(items) {
   return items.reduce((sum, item, index) => sum + item.branchHeight + (index < items.length - 1 ? TOPOLOGY_VERTICAL_GAP : 0), 0);
 }
 
+function formatReverseOutputEventType(phaseCode) {
+  const normalizedCode = String(phaseCode ?? '').trim();
+  const labels = {
+    INITIATED: 'Initiated Activity Event',
+    START: 'Started Activity Event',
+    CHECK_IN: 'Accepted Activity Event',
+    ACTIVITY_COMPLETE: 'Activity Event',
+    COMPLETE_FAILURE: 'Failure Activity Event',
+    'COMPLETE FAILURE': 'Failure Activity Event',
+    CHANGE_BUSINESS_STAGE: 'Running Activity Event',
+    BUSINESS_COMPLETE: 'Business Event',
+  };
+
+  return labels[normalizedCode] || normalizedCode || 'не задан';
+}
+
 function getReverseOutputLayout(stage, resultIndex, reverseIndex, output, outputIndex) {
   const serviceSummary = [output.body?.service?.scenario, output.body?.service?.status].filter(Boolean).join(' / ');
-  const slaSummary = [
-    output.body?.service?.sla?.durationValue,
-    output.body?.service?.sla?.durationUnit?.code,
-    output.body?.service?.sla?.status?.code,
-  ]
-    .filter(Boolean)
-    .join(' / ');
+  const bodySummary = [output.body?.type, output.body?.eventObject?.type].filter(Boolean).join(' / ');
+  const hasLogConfiguration = Boolean(output.log?.journalServiceName || output.log?.message);
+  const hasSlaConfiguration = Boolean(
+    output.body?.service?.sla?.durationValue ||
+      output.body?.service?.sla?.durationUnit?.code ||
+      output.body?.service?.sla?.status?.code,
+  );
   const summaryItems = [
-    { label: 'Body', value: output.body?.type || output.body?.eventObject?.type || 'not set' },
-    { label: 'Service', value: serviceSummary || 'not set' },
-    { label: 'SLA', value: slaSummary || 'not set' },
+    { value: formatReverseOutputEventType(output.phase?.code), icon: 'send' },
+    ...(output.name ? [{ value: output.name }] : []),
+    ...(serviceSummary ? [{ value: serviceSummary }] : []),
+    ...(bodySummary ? [{ value: bodySummary }] : []),
+    ...(hasLogConfiguration ? [{ value: 'Интеграционный журнал настроен', icon: 'check' }] : []),
+    ...(hasSlaConfiguration ? [{ value: 'SLA настроен', icon: 'check' }] : []),
   ];
-  const nodeHeight = 208;
+  const nodeHeight = estimateReverseOutputNodeHeight({ summaryItems });
 
   return {
     nodeId: getReverseOutputNodeId(stage.id, resultIndex, reverseIndex, outputIndex),
-    title: output.nodeName || `reverseOutput_${outputIndex + 1}`,
-    subtitle: output.nodeComment || output.rule || output.log?.message || 'добавьте комментарий',
     summaryItems,
     nodeHeight,
-    branchHeight: nodeHeight,
+    branchHeight: getNodeFootprintHeight(nodeHeight),
   };
 }
 
@@ -945,20 +1114,18 @@ function getReverseLayout(stage, resultIndex, reverse, reverseIndex, expandedSet
   const outputLayouts = expanded
     ? (reverse.output ?? []).map((output, outputIndex) => getReverseOutputLayout(stage, resultIndex, reverseIndex, output, outputIndex))
     : [];
-  const nodeHeight = estimateNodeHeight({
-    title: reverse.nodeName || `reverse_${reverseIndex + 1}`,
-    subtitle: reverse.nodeComment || `${(reverse.output ?? []).length} output`,
-    isExpandable: (reverse.output?.length ?? 0) > 0,
-  });
+  const statusValue = reverse.status?.code || 'STATUS не задан';
+  const summaryItems = [{ value: statusValue }];
+  const nodeHeight = estimateReverseNodeHeight(statusValue, (reverse.output?.length ?? 0) > 0);
 
   return {
     nodeId,
     expanded,
-    title: reverse.nodeName || `reverse_${reverseIndex + 1}`,
-    subtitle: reverse.nodeComment || `${(reverse.output ?? []).length} output`,
+    summaryItems,
+    outputCount: (reverse.output ?? []).length,
     nodeHeight,
     outputLayouts,
-    branchHeight: Math.max(nodeHeight, stackBranchHeight(outputLayouts)),
+    branchHeight: Math.max(getNodeFootprintHeight(nodeHeight), stackBranchHeight(outputLayouts)),
   };
 }
 
@@ -968,20 +1135,22 @@ function getResultLayout(stage, result, resultIndex, expandedSet) {
   const reverseLayouts = expanded
     ? (result.reverse ?? []).map((reverse, reverseIndex) => getReverseLayout(stage, resultIndex, reverse, reverseIndex, expandedSet))
     : [];
-  const nodeHeight = estimateNodeHeight({
-    title: result.nodeName || `result_${resultIndex + 1}`,
-    subtitle: result.nodeComment || result.reverse?.[0]?.status?.code || 'добавьте комментарий',
+  const summaryItems = (result.inputScenarios?.length ? result.inputScenarios : ['Сценарии не заданы']).map((scenario) => ({
+    value: scenario,
+  }));
+  const nodeHeight = estimateResultNodeHeight({
+    scenarios: summaryItems.map((item) => item.value),
     isExpandable: (result.reverse?.length ?? 0) > 0,
   });
 
   return {
     nodeId,
     expanded,
-    title: result.nodeName || `result_${resultIndex + 1}`,
-    subtitle: result.nodeComment || result.reverse?.[0]?.status?.code || 'добавьте комментарий',
+    summaryItems,
+    reverseCount: (result.reverse ?? []).length,
     nodeHeight,
     reverseLayouts,
-    branchHeight: Math.max(nodeHeight, stackBranchHeight(reverseLayouts)),
+    branchHeight: Math.max(getNodeFootprintHeight(nodeHeight), stackBranchHeight(reverseLayouts)),
   };
 }
 
@@ -993,7 +1162,7 @@ function getStageLayout(stage, expandedSet) {
     : [];
   const nodeHeight = estimateNodeHeight({
     title: stage.nodeName || 'stage',
-    subtitle: stage.nodeComment || stage.description || 'добавьте комментарий',
+    subtitle: stage.nodeComment || 'добавьте комментарий',
     isExpandable: (stage.configurator?.result?.length ?? 0) > 0,
   });
 
@@ -1003,7 +1172,7 @@ function getStageLayout(stage, expandedSet) {
     expanded,
     nodeHeight,
     resultLayouts,
-    branchHeight: Math.max(nodeHeight, stackBranchHeight(resultLayouts)),
+    branchHeight: Math.max(getNodeFootprintHeight(nodeHeight), stackBranchHeight(resultLayouts)),
   };
 }
 
@@ -1023,20 +1192,22 @@ function getSubprocessLayout(subprocess, expandedSet) {
     expanded,
     nodeHeight,
     stageLayouts,
-    branchHeight: Math.max(nodeHeight, stackBranchHeight(stageLayouts)),
+    branchHeight: Math.max(getNodeFootprintHeight(nodeHeight), stackBranchHeight(stageLayouts)),
   };
 }
 
 function placeTopologyNode(nodes, nodeId, x, startY, nodeHeight, branchHeight, data) {
   const rawY = startY + Math.max(0, (branchHeight - nodeHeight) / 2);
-  const y = Math.round(rawY / 8) * 8;
   nodes.push({
     id: nodeId,
     type: 'processNode',
-    position: { x, y },
+    position: { x, y: rawY },
     sourcePosition: Position.Right,
     targetPosition: Position.Left,
-    data,
+    data: {
+      ...data,
+      nodeHeight,
+    },
     style: data?.nodeStyle,
   });
 }
@@ -1058,7 +1229,7 @@ function buildTopologyModel(processConfig, expandedNodeIds = []) {
     subtitle: processConfig.process.nodeComment || 'Корневой процесс',
     isExpandable: (processConfig.process.subprocess?.length ?? 0) > 0,
   });
-  const processBranchHeight = Math.max(processHeight, stackBranchHeight(subprocessLayouts));
+  const processBranchHeight = Math.max(getNodeFootprintHeight(processHeight), stackBranchHeight(subprocessLayouts));
   const columnStep = TOPOLOGY_NODE_WIDTH + TOPOLOGY_HORIZONTAL_GAP;
   const processX = TOPOLOGY_LEFT_PADDING;
 
@@ -1066,6 +1237,7 @@ function buildTopologyModel(processConfig, expandedNodeIds = []) {
     title: processConfig.process.nodeName || processConfig.process.contextCode?.code || 'process',
     kind: 'process',
     secondaryLabel: processConfig.process.nodeComment || 'Корневой процесс',
+    childCount: (processConfig.process.subprocess ?? []).length,
     isExpandable: (processConfig.process.subprocess?.length ?? 0) > 0,
     isExpanded: expandedSet.has(processNodeId),
   });
@@ -1088,6 +1260,7 @@ function buildTopologyModel(processConfig, expandedNodeIds = []) {
         title: subprocessLayout.subprocess.nodeName || 'subprocess',
         kind: 'subprocess',
         secondaryLabel: subprocessLayout.subprocess.nodeComment || 'добавьте комментарий',
+        childCount: (subprocessLayout.subprocess.stages ?? []).length,
         isExpandable: (subprocessLayout.subprocess.stages?.length ?? 0) > 0,
         isExpanded: subprocessLayout.expanded,
       },
@@ -1099,9 +1272,10 @@ function buildTopologyModel(processConfig, expandedNodeIds = []) {
       subprocessLayout.stageLayouts.forEach((stageLayout, stageIndex) => {
         const stageX = subprocessX + columnStep;
         placeTopologyNode(nodes, stageLayout.nodeId, stageX, currentStageY, stageLayout.nodeHeight, stageLayout.branchHeight, {
-          title: stageLayout.stage.nodeName || stageLayout.stage.executor || 'stage',
+          title: stageLayout.stage.nodeName || 'stage',
           kind: 'stage',
-          secondaryLabel: stageLayout.stage.nodeComment || stageLayout.stage.description || 'добавьте комментарий',
+          secondaryLabel: stageLayout.stage.nodeComment || 'добавьте комментарий',
+          childCount: (stageLayout.stage.configurator?.result ?? []).length,
           isExpandable: (stageLayout.stage.configurator?.result?.length ?? 0) > 0,
           isExpanded: stageLayout.expanded,
         });
@@ -1112,11 +1286,12 @@ function buildTopologyModel(processConfig, expandedNodeIds = []) {
           stageLayout.resultLayouts.forEach((resultLayout, resultIndex) => {
               const resultX = stageX + columnStep;
               placeTopologyNode(nodes, resultLayout.nodeId, resultX, currentResultY, resultLayout.nodeHeight, resultLayout.branchHeight, {
-                title: resultLayout.title,
                 kind: 'result',
-                secondaryLabel: resultLayout.subtitle,
-                isExpandable: resultLayout.reverseLayouts.length > 0,
+                summaryItems: resultLayout.summaryItems,
+                childCount: resultLayout.reverseCount,
+                isExpandable: resultLayout.reverseCount > 0,
                 isExpanded: resultLayout.expanded,
+                nodeClassName: 'process-node--result',
               });
               edges.push(createTopologyEdge(`${stageLayout.nodeId}->${resultLayout.nodeId}`, stageLayout.nodeId, resultLayout.nodeId));
 
@@ -1125,11 +1300,12 @@ function buildTopologyModel(processConfig, expandedNodeIds = []) {
                 resultLayout.reverseLayouts.forEach((reverseLayout, reverseIndex) => {
                   const reverseX = resultX + columnStep;
                   placeTopologyNode(nodes, reverseLayout.nodeId, reverseX, currentReverseY, reverseLayout.nodeHeight, reverseLayout.branchHeight, {
-                    title: reverseLayout.title,
                     kind: 'reverse',
-                    secondaryLabel: reverseLayout.subtitle,
-                    isExpandable: reverseLayout.outputLayouts.length > 0,
+                    summaryItems: reverseLayout.summaryItems,
+                    childCount: reverseLayout.outputCount,
+                    isExpandable: reverseLayout.outputCount > 0,
                     isExpanded: reverseLayout.expanded,
+                    nodeClassName: 'process-node--reverse',
                   });
                   edges.push(createTopologyEdge(`${resultLayout.nodeId}->${reverseLayout.nodeId}`, resultLayout.nodeId, reverseLayout.nodeId));
 
@@ -1138,12 +1314,11 @@ function buildTopologyModel(processConfig, expandedNodeIds = []) {
                     reverseLayout.outputLayouts.forEach((outputLayout, outputIndex) => {
                       const outputX = reverseX + columnStep;
                       placeTopologyNode(nodes, outputLayout.nodeId, outputX, currentOutputY, outputLayout.nodeHeight, outputLayout.branchHeight, {
-                        title: outputLayout.title,
                         kind: 'reverseOutput',
-                        secondaryLabel: outputLayout.subtitle,
                         summaryItems: outputLayout.summaryItems,
+                        childCount: undefined,
                         nodeClassName: 'process-node--reverse-output',
-                        nodeStyle: { width: 360 },
+                        nodeStyle: { width: 460 },
                         isExpandable: false,
                         isExpanded: false,
                       });
@@ -1208,7 +1383,18 @@ function updateSelectedNode(processConfig, selectedNodeId, values) {
         subprocess: (processConfig.process.subprocess ?? []).map((subprocess) => ({
           ...subprocess,
           stages: (subprocess.stages ?? []).map((stage) =>
-            String(stage.id) === targetId ? { ...stage, ...values } : stage,
+            String(stage.id) === targetId
+              ? {
+                  ...stage,
+                  ...Object.fromEntries(Object.entries(values).filter(([key]) => key !== 'configurator')),
+                  configurator: values.configurator
+                    ? {
+                        ...(stage.configurator ?? {}),
+                        ...values.configurator,
+                      }
+                    : stage.configurator,
+                }
+              : stage,
           ),
         })),
       },
@@ -1226,10 +1412,9 @@ function updateSelectedNode(processConfig, selectedNodeId, values) {
             String(stage.id) === targetId
               ? {
                   ...stage,
-                  description: values.description ?? stage.description,
                   configurator: {
                     ...(stage.configurator ?? {}),
-                    ...Object.fromEntries(Object.entries(values).filter(([key]) => key !== 'description')),
+                    ...values,
                   },
                 }
               : stage,
@@ -1361,10 +1546,7 @@ function findSelectedNode(processConfig, selectedNodeId) {
       if (stage) {
         return {
           kind,
-          node: {
-            ...(stage.configurator ?? {}),
-            description: stage.description ?? '',
-          },
+          node: stage.configurator ?? {},
           parent: stage,
           subprocess,
         };
@@ -1414,7 +1596,7 @@ function findSelectedNode(processConfig, selectedNodeId) {
   return null;
 }
 
-function getNodeSavePayload(kind, draft, subprocessTriggerText = '') {
+function getNodeSavePayload(kind, draft, subprocessTriggerText = '', filterEventRuleText = '', reverseOutputRuleText = '') {
   if (!kind) {
     return null;
   }
@@ -1434,7 +1616,6 @@ function getNodeSavePayload(kind, draft, subprocessTriggerText = '') {
       nodeName: draft.nodeName ?? '',
       nodeComment: draft.nodeComment ?? '',
       disabled: draft.disabled ?? false,
-      contextCode: normalizeReferenceDraft(draft.contextCode),
       trigger: {
         ...(draft.trigger ?? {}),
         rule: JSON.stringify(rawTrigger ? JSON.parse(rawTrigger) : {}, null, 2),
@@ -1443,13 +1624,24 @@ function getNodeSavePayload(kind, draft, subprocessTriggerText = '') {
   }
 
   if (kind === 'stage') {
+    const rawFilterEventRule = filterEventRuleText.trim();
     return {
       executor: draft.executor ?? '',
       nodeName: draft.nodeName ?? '',
       nodeComment: draft.nodeComment ?? '',
-      contextCode: normalizeReferenceDraft(draft.contextCode),
       log: draft.log ?? { journalServiceName: '' },
-      configurator: draft.configurator ?? null,
+      configurator: serializeStageConfigurator(
+        draft.configurator,
+        JSON.stringify(rawFilterEventRule ? JSON.parse(rawFilterEventRule) : {}, null, 2),
+      ),
+    };
+  }
+
+  if (kind === 'reverseOutput') {
+    const rawRule = reverseOutputRuleText.trim();
+    return {
+      ...serializeReverseOutput(draft),
+      rule: JSON.stringify(rawRule ? JSON.parse(rawRule) : {}, null, 2),
     };
   }
 
@@ -1461,23 +1653,85 @@ function getNodeSavePayload(kind, draft, subprocessTriggerText = '') {
       filterEventRule: draft.filterEventRule ?? '',
       audit: draft.audit ?? null,
       result: draft.result ?? [],
-      description: draft.description ?? '',
+    };
+  }
+
+  if (kind === 'result') {
+    return {
+      id: draft.id ?? undefined,
+      inputScenarios: sanitizeInputScenarios(draft.inputScenarios),
+      reverse: draft.reverse ?? [],
     };
   }
 
   return draft;
 }
 
+function getNodePreviewPayload(kind, draft, subprocessTriggerText = '', filterEventRuleText = '', reverseOutputRuleText = '') {
+  if (!kind) {
+    return null;
+  }
+
+  if (kind === 'subprocess') {
+    return {
+      nodeName: draft.nodeName ?? '',
+      nodeComment: draft.nodeComment ?? '',
+      disabled: draft.disabled ?? false,
+      trigger: {
+        ...(draft.trigger ?? {}),
+        rule: subprocessTriggerText,
+      },
+    };
+  }
+
+  if (kind === 'stage') {
+    return {
+      executor: draft.executor ?? '',
+      nodeName: draft.nodeName ?? '',
+      nodeComment: draft.nodeComment ?? '',
+      log: draft.log ?? { journalServiceName: '' },
+      configurator: serializeStageConfigurator(draft.configurator, filterEventRuleText),
+    };
+  }
+
+  if (kind === 'reverseOutput') {
+    return {
+      ...serializeReverseOutput(draft),
+      rule: reverseOutputRuleText,
+    };
+  }
+
+  if (kind === 'result') {
+    return {
+      id: draft.id ?? undefined,
+      inputScenarios: sanitizeInputScenarios(draft.inputScenarios),
+      reverse: draft.reverse ?? [],
+    };
+  }
+
+  return getNodeSavePayload(kind, draft, subprocessTriggerText, filterEventRuleText, reverseOutputRuleText);
+}
+
 function ProcessNode({ data, selected }) {
   const title = data?.title ?? 'node';
-  const subtitle = data?.secondaryLabel ?? '';
+  const subtitle = truncateText(data?.secondaryLabel ?? '');
   const kind = data?.kind ?? 'node';
   const summaryItems = data?.summaryItems ?? [];
+  const childCount = data?.childCount;
   const isExpandable = Boolean(data?.isExpandable);
   const isExpanded = Boolean(data?.isExpanded);
+  const nodeStyle = data?.nodeHeight
+    ? kind === 'reverseOutput'
+      ? { minHeight: `${data.nodeHeight}px` }
+      : { height: `${data.nodeHeight}px`, minHeight: `${data.nodeHeight}px` }
+    : undefined;
   const editNode = (event) => {
     event.stopPropagation();
     data?.onEdit?.();
+  };
+  const viewNode = (event) => {
+    event.stopPropagation();
+    data?.onView?.();
   };
   const reorderStages = (event) => {
     event.stopPropagation();
@@ -1491,72 +1745,118 @@ function ProcessNode({ data, selected }) {
     event.stopPropagation();
     data?.onAddChild?.();
   };
+  const showTitle = kind !== 'result' && kind !== 'reverse' && kind !== 'reverseOutput';
+  const showSubtitle = kind !== 'result' && kind !== 'reverse' && kind !== 'reverseOutput';
 
   return (
-    <div className={cn('process-node', data?.nodeClassName, selected && 'selected')}>
+    <div
+      className={cn('process-node', data?.nodeClassName, selected && 'selected')}
+      style={nodeStyle}
+    >
       <Handle type="target" position={Position.Left} />
       <Handle type="source" position={Position.Right} />
-      <button type="button" className="process-node__edit" onClick={editNode} aria-label="Edit node" title="Edit">
-        <Edit01 aria-hidden className="process-node__edit-icon" size={18} />
-      </button>
-      {kind === 'subprocess' && (
-        <button
-          type="button"
-          className="process-node__action process-node__action-order"
-          onClick={reorderStages}
-          aria-label="Change stage order"
-          title="Change stage order"
-        >
-          <Rows01 aria-hidden className="process-node__edit-icon" size={18} />
+      <div className="process-node__actions">
+        <button type="button" className="process-node__action process-node__action-view" onClick={viewNode} aria-label="View node" title="View">
+          <Eye aria-hidden className="process-node__edit-icon" size={18} />
         </button>
-      )}
-      {(kind === 'process' || kind === 'stage' || kind === 'result' || kind === 'reverse') && (
-        <button
-          type="button"
-          className="process-node__action process-node__action-add"
-          onClick={addChildNode}
-          aria-label={
-            kind === 'process'
-              ? 'Add subprocess'
-              : kind === 'stage'
-                ? 'Add result'
-                : kind === 'result'
-                  ? 'Add reverse'
-                  : 'Add reverse output'
-          }
-          title={
-            kind === 'process'
-              ? 'Add subprocess'
-              : kind === 'stage'
-                ? 'Add result'
-                : kind === 'result'
-                  ? 'Add reverse'
-                  : 'Add reverse output'
-          }
-        >
-          <Plus aria-hidden className="process-node__edit-icon" size={18} />
+        <button type="button" className="process-node__edit" onClick={editNode} aria-label="Edit node" title="Edit">
+          <Edit01 aria-hidden className="process-node__edit-icon" size={18} />
         </button>
-      )}
-      {data?.canDelete && (
-        <button
-          type="button"
-          className="process-node__action process-node__action-delete"
-          onClick={deleteNode}
-          aria-label="Delete node"
-          title="Delete node"
-        >
-          <Trash01 aria-hidden className="process-node__edit-icon" size={18} />
-        </button>
-      )}
-      <div className="process-node__kind">{kind}</div>
-      <div className="process-node__title">{title}</div>
-      <div className="process-node__subtitle">{subtitle || 'Без описания'}</div>
+        {kind === 'subprocess' && (
+          <button
+            type="button"
+            className="process-node__action process-node__action-order"
+            onClick={reorderStages}
+            aria-label="Change stage order"
+            title="Change stage order"
+          >
+            <Rows01 aria-hidden className="process-node__edit-icon" size={18} />
+          </button>
+        )}
+        {(kind === 'process' || kind === 'subprocess' || kind === 'stage' || kind === 'result' || kind === 'reverse') && (
+          <button
+            type="button"
+            className="process-node__action process-node__action-add"
+            onClick={addChildNode}
+            aria-label={
+              kind === 'process'
+                ? 'Add subprocess'
+                : kind === 'subprocess'
+                  ? 'Add stage'
+                : kind === 'stage'
+                  ? 'Add result'
+                  : kind === 'result'
+                    ? 'Add reverse'
+                    : 'Add reverse output'
+            }
+            title={
+              kind === 'process'
+                ? 'Add subprocess'
+                : kind === 'subprocess'
+                  ? 'Add stage'
+                : kind === 'stage'
+                  ? 'Add result'
+                  : kind === 'result'
+                    ? 'Add reverse'
+                    : 'Add reverse output'
+            }
+          >
+            <Plus aria-hidden className="process-node__edit-icon" size={18} />
+          </button>
+        )}
+        {data?.canDelete && (
+          <button
+            type="button"
+            className="process-node__action process-node__action-delete"
+            onClick={deleteNode}
+            aria-label="Delete node"
+            title="Delete node"
+          >
+            <Trash01 aria-hidden className="process-node__edit-icon" size={18} />
+          </button>
+        )}
+      </div>
+      <div className="process-node__meta">
+        {typeof childCount === 'number' && <div className="process-node__counter">{childCount}</div>}
+      </div>
+      {showTitle && <div className="process-node__title">{title}</div>}
+      {showSubtitle && <div className="process-node__subtitle">{subtitle || 'Без описания'}</div>}
       {summaryItems.length > 0 && (
-        <div className="process-node__summary">
-          {summaryItems.map((item) => (
-            <div key={`${item.label}-${item.value}`} className="process-node__summary-item">
-              <div className="process-node__summary-label">{item.label}</div>
-              <div className="process-node__summary-value">{item.value}</div>
+        <div
+          className={cn(
+            'process-node__summary',
+            (kind === 'result' || kind === 'reverseOutput') && 'process-node__summary--plain-list',
+          )}
+        >
+          {summaryItems.map((item, index) => (
+            <div
+              key={`${kind}-${index}-${item.value}`}
+              className={cn(
+                'process-node__summary-item',
+                (kind === 'result' || kind === 'reverseOutput') && 'process-node__summary-item--plain',
+              )}
+            >
+              {kind === 'result' || kind === 'reverseOutput' ? (
+                <div className="process-node__summary-list-item">
+                  {kind === 'result' && <Bell01 aria-hidden className="process-node__summary-icon" size={16} />}
+                  {kind === 'reverseOutput' && item.icon === 'send' && (
+                    <Send03 aria-hidden className="process-node__summary-icon" size={16} />
+                  )}
+                  {kind === 'reverseOutput' && item.icon === 'check' && (
+                    <CheckVerified02
+                      aria-hidden
+                      className="process-node__summary-icon process-node__summary-icon--success"
+                      size={16}
+                    />
+                  )}
+                  <div className="process-node__summary-value">{item.value}</div>
+                </div>
+              ) : (
+                <>
+                  <div className="process-node__summary-label">{item.label}</div>
+                  <div className="process-node__summary-value">{item.value}</div>
+                </>
+              )}
             </div>
           ))}
         </div>
@@ -1564,6 +1864,51 @@ function ProcessNode({ data, selected }) {
       {isExpandable && <div className="process-node__hint">{isExpanded ? 'Скрыть дочерние' : 'Показать дочерние'}</div>}
     </div>
   );
+}
+
+function AlignTreeButton({
+  processConfig,
+  expandedNodeIds,
+  onAlignTree,
+}) {
+  const reactFlow = useReactFlow();
+
+  const handleAlignTree = () => {
+    const nextGraph = buildTopologyModel(processConfig, expandedNodeIds);
+    onAlignTree(nextGraph);
+    window.requestAnimationFrame(() => {
+      reactFlow.fitView({ padding: 0.2, duration: 250 });
+    });
+  };
+
+  return (
+    <Button variant="secondary" onClick={handleAlignTree}>
+      Выровнять дерево
+    </Button>
+  );
+}
+
+function AutoFitView({
+  processConfig,
+  expandedNodeIds,
+}) {
+  const reactFlow = useReactFlow();
+
+  useEffect(() => {
+    if (!processConfig?.id) {
+      return;
+    }
+
+    window.requestAnimationFrame(() => {
+      reactFlow.fitView({
+        padding: 0.35,
+        minZoom: 0.15,
+        duration: 250,
+      });
+    });
+  }, [expandedNodeIds, processConfig?.id, reactFlow]);
+
+  return null;
 }
 
 function ProcessTopology({
@@ -1574,16 +1919,19 @@ function ProcessTopology({
   expandedNodeIds,
   onToggleNode,
   onEditNode,
+  onViewNode,
   onReorderSubprocessNode,
   onDeleteNode,
   onAddChildNode,
   onAddSubprocess,
   onCreateProcess,
+  onExportProcessConfig,
   onSelectProcessConfig,
   onToggleFullscreen,
   isFullscreen,
   isCreateDisabled,
   isCreating,
+  isExporting,
 }) {
   const [graph, setGraph] = useState({ nodes: [], edges: [] });
 
@@ -1608,6 +1956,15 @@ function ProcessTopology({
               placeholder="Выберите процесс"
               isDisabled={processConfigOptions.length === 0}
             />
+            <Button
+              variant="secondary"
+              onClick={onExportProcessConfig}
+              isLoading={isExporting}
+              isDisabled={!selectedProcessConfigId}
+            >
+              Скачать YAML
+            </Button>
+            <AlignTreeButton processConfig={processConfig} expandedNodeIds={expandedNodeIds} onAlignTree={setGraph} />
           </div>
           <Button variant="secondary" onClick={onToggleFullscreen}>
             {isFullscreen ? 'Свернуть экран' : 'На весь экран'}
@@ -1620,12 +1977,13 @@ function ProcessTopology({
             data: {
               ...node.data,
               onEdit: () => onEditNode(node.id),
+              onView: () => onViewNode(node.id),
               onReorder: node.data.kind === 'subprocess' ? () => onReorderSubprocessNode(node.id) : undefined,
               onDelete: () => onDeleteNode(node.id),
               onAddChild:
                 node.data.kind === 'process'
                   ? () => onAddSubprocess()
-                  : node.data.kind === 'stage' || node.data.kind === 'result' || node.data.kind === 'reverse'
+                  : node.data.kind === 'subprocess' || node.data.kind === 'stage' || node.data.kind === 'result' || node.data.kind === 'reverse'
                     ? () => onAddChildNode(node.id)
                   : undefined,
               canDelete: node.data.kind !== 'process',
@@ -1634,13 +1992,14 @@ function ProcessTopology({
           edges={graph.edges}
           nodeTypes={{ processNode: ProcessNode }}
           fitView
-          fitViewOptions={{ padding: 0.2 }}
-          minZoom={0.2}
+          fitViewOptions={{ padding: 0.35, minZoom: 0.15 }}
+          minZoom={0.15}
           maxZoom={2}
           nodesDraggable={false}
           onNodeClick={(_, node) => onToggleNode(node.id)}
           proOptions={{ hideAttribution: true }}
         >
+          <AutoFitView processConfig={processConfig} expandedNodeIds={expandedNodeIds} />
           <Controls position="top-right" showInteractive={false} />
         </ReactFlow>
       </div>
@@ -1652,36 +2011,87 @@ function NodeEditor({
   processConfig,
   selectedNodeId,
   onSave,
+  onDraftChange,
+  onAutosaveStatusChange,
   onAddSubprocess,
-  onAddStage,
-  onReorderStages,
   onBulkCreateResults,
   contextCodeOptions,
   phaseOptions,
+  b3StatusOptions,
+  slaDurationUnitOptions,
   slaStatusOptions,
   isSaving,
 }) {
   const selected = findSelectedNode(processConfig, selectedNodeId);
   const [draft, setDraft] = useState({});
   const [bulkResultInput, setBulkResultInput] = useState('');
-  const [stageOrder, setStageOrder] = useState([]);
-  const [draggedStageId, setDraggedStageId] = useState(null);
   const [subprocessTriggerText, setSubprocessTriggerText] = useState('');
   const [subprocessTriggerError, setSubprocessTriggerError] = useState('');
   const [subprocessTriggerStatus, setSubprocessTriggerStatus] = useState('valid');
+  const [filterEventRuleText, setFilterEventRuleText] = useState('');
+  const [filterEventRuleError, setFilterEventRuleError] = useState('');
+  const [filterEventRuleStatus, setFilterEventRuleStatus] = useState('valid');
+  const [reverseOutputRuleText, setReverseOutputRuleText] = useState('');
+  const [reverseOutputRuleError, setReverseOutputRuleError] = useState('');
+  const [reverseOutputRuleStatus, setReverseOutputRuleStatus] = useState('valid');
   const draftRef = useRef({});
-  const stageOrderRef = useRef([]);
   const autosaveTimeoutRef = useRef(null);
+  const autosaveIntervalRef = useRef(null);
+  const autosaveDeadlineRef = useRef(null);
   const lastSavedPayloadRef = useRef('');
+  const onSaveRef = useRef(onSave);
+  const onDraftChangeRef = useRef(onDraftChange);
+  const onAutosaveStatusChangeRef = useRef(onAutosaveStatusChange);
+  const selectedKind = selected?.kind ?? null;
   const selectedNodeSnapshot = selected?.node ? JSON.stringify(selected.node) : '';
-  const selectedSubprocessStageIds =
-    selected?.kind === 'subprocess' ? (selected.node?.stages ?? []).map((stage) => String(stage.id)).join('|') : '';
+
+  const publishAutosaveStatus = (remainingMs) => {
+    if (remainingMs == null || remainingMs <= 0) {
+      onAutosaveStatusChangeRef.current?.(null);
+      return;
+    }
+
+    onAutosaveStatusChangeRef.current?.({
+      secondsLeft: Math.ceil(remainingMs / 1000),
+    });
+  };
+
+  const clearAutosaveScheduling = () => {
+    if (autosaveTimeoutRef.current) {
+      clearTimeout(autosaveTimeoutRef.current);
+      autosaveTimeoutRef.current = null;
+    }
+    if (autosaveIntervalRef.current) {
+      clearInterval(autosaveIntervalRef.current);
+      autosaveIntervalRef.current = null;
+    }
+    autosaveDeadlineRef.current = null;
+    publishAutosaveStatus(null);
+  };
+
+  useEffect(() => {
+    onSaveRef.current = onSave;
+  }, [onSave]);
+
+  useEffect(() => {
+    onDraftChangeRef.current = onDraftChange;
+  }, [onDraftChange]);
+
+  useEffect(() => {
+    onAutosaveStatusChangeRef.current = onAutosaveStatusChange;
+  }, [onAutosaveStatusChange]);
 
   useEffect(() => {
     setDraft(selected?.node ?? {});
     draftRef.current = selected?.node ?? {};
     try {
-      const payload = getNodeSavePayload(selected?.kind, selected?.node ?? {}, selected?.node?.trigger?.rule ?? '');
+      const payload = getNodeSavePayload(
+        selected?.kind,
+        selected?.node ?? {},
+        selected?.node?.trigger?.rule ?? '',
+        selected?.kind === 'stage' ? selected?.node?.configurator?.filterEventRule ?? '' : '',
+        selected?.kind === 'reverseOutput' ? selected?.node?.rule ?? '' : '',
+      );
       lastSavedPayloadRef.current = payload ? JSON.stringify(payload) : '';
     } catch {
       lastSavedPayloadRef.current = '';
@@ -1690,33 +2100,14 @@ function NodeEditor({
 
   useEffect(() => {
     setBulkResultInput('');
-    if (autosaveTimeoutRef.current) {
-      clearTimeout(autosaveTimeoutRef.current);
-      autosaveTimeoutRef.current = null;
-    }
+    clearAutosaveScheduling();
   }, [selectedNodeId]);
 
   useEffect(() => {
     return () => {
-      if (autosaveTimeoutRef.current) {
-        clearTimeout(autosaveTimeoutRef.current);
-      }
+      clearAutosaveScheduling();
     };
   }, []);
-
-  useEffect(() => {
-    if (selected?.kind !== 'subprocess') {
-      setStageOrder([]);
-      stageOrderRef.current = [];
-      setDraggedStageId(null);
-      return;
-    }
-
-    const nextStageOrder = (selected.node?.stages ?? []).map((stage) => String(stage.id));
-    setStageOrder(nextStageOrder);
-    stageOrderRef.current = nextStageOrder;
-    setDraggedStageId(null);
-  }, [selectedNodeId, selected?.kind, selectedSubprocessStageIds]);
 
   useEffect(() => {
     if (selected?.kind !== 'subprocess') {
@@ -1747,39 +2138,132 @@ function NodeEditor({
   }, [selected?.kind, subprocessTriggerText]);
 
   useEffect(() => {
+    if (selected?.kind !== 'stage') {
+      setFilterEventRuleText('');
+      setFilterEventRuleError('');
+      setFilterEventRuleStatus('valid');
+      return;
+    }
+
+    setFilterEventRuleText(formatJsonSnippet(selected.node?.configurator?.filterEventRule ?? ''));
+    setFilterEventRuleError('');
+    setFilterEventRuleStatus('valid');
+  }, [selectedNodeId, selected?.kind, selected?.node?.configurator?.filterEventRule]);
+
+  useEffect(() => {
+    if (selected?.kind !== 'stage') {
+      return;
+    }
+    try {
+      const rawFilterEventRule = filterEventRuleText.trim();
+      JSON.parse(rawFilterEventRule || '{}');
+      setFilterEventRuleError('');
+      setFilterEventRuleStatus('valid');
+    } catch {
+      setFilterEventRuleError('Невалидный JSON.');
+      setFilterEventRuleStatus('invalid');
+    }
+  }, [selected?.kind, filterEventRuleText]);
+
+  useEffect(() => {
+    if (selected?.kind !== 'reverseOutput') {
+      setReverseOutputRuleText('');
+      setReverseOutputRuleError('');
+      setReverseOutputRuleStatus('valid');
+      return;
+    }
+
+    setReverseOutputRuleText(formatJsonSnippet(selected.node?.rule ?? ''));
+    setReverseOutputRuleError('');
+    setReverseOutputRuleStatus('valid');
+  }, [selectedNodeId, selected?.kind, selected?.node?.rule]);
+
+  useEffect(() => {
+    if (selected?.kind !== 'reverseOutput') {
+      return;
+    }
+    try {
+      const rawRule = reverseOutputRuleText.trim();
+      JSON.parse(rawRule || '{}');
+      setReverseOutputRuleError('');
+      setReverseOutputRuleStatus('valid');
+    } catch {
+      setReverseOutputRuleError('Невалидный JSON.');
+      setReverseOutputRuleStatus('invalid');
+    }
+  }, [selected?.kind, reverseOutputRuleText]);
+
+  useEffect(() => {
     if (!selected) {
       return undefined;
     }
 
+    const previewPayload = getNodePreviewPayload(
+      selectedKind,
+      draft,
+      subprocessTriggerText,
+      filterEventRuleText,
+      reverseOutputRuleText,
+    );
+    onDraftChangeRef.current(previewPayload);
+
     let nextPayload;
     try {
-      nextPayload = getNodeSavePayload(selected.kind, draft, subprocessTriggerText);
+      nextPayload = getNodeSavePayload(
+        selectedKind,
+        draft,
+        subprocessTriggerText,
+        filterEventRuleText,
+        reverseOutputRuleText,
+      );
     } catch {
       return undefined;
     }
 
     const nextPayloadSnapshot = JSON.stringify(nextPayload);
     if (nextPayloadSnapshot === lastSavedPayloadRef.current) {
+      clearAutosaveScheduling();
       return undefined;
     }
 
-    if (autosaveTimeoutRef.current) {
-      clearTimeout(autosaveTimeoutRef.current);
-    }
+    clearAutosaveScheduling();
+    autosaveDeadlineRef.current = Date.now() + NODE_AUTOSAVE_DELAY_MS;
+    publishAutosaveStatus(NODE_AUTOSAVE_DELAY_MS);
+    autosaveIntervalRef.current = window.setInterval(() => {
+      const remainingMs = (autosaveDeadlineRef.current ?? 0) - Date.now();
+      if (remainingMs <= 0) {
+        if (autosaveIntervalRef.current) {
+          clearInterval(autosaveIntervalRef.current);
+          autosaveIntervalRef.current = null;
+        }
+        publishAutosaveStatus(null);
+        return;
+      }
+
+      publishAutosaveStatus(remainingMs);
+    }, 250);
 
     autosaveTimeoutRef.current = window.setTimeout(() => {
+      if (autosaveIntervalRef.current) {
+        clearInterval(autosaveIntervalRef.current);
+        autosaveIntervalRef.current = null;
+      }
       autosaveTimeoutRef.current = null;
-      lastSavedPayloadRef.current = nextPayloadSnapshot;
-      onSave(nextPayload);
+      autosaveDeadlineRef.current = null;
+      publishAutosaveStatus(null);
+      Promise.resolve(onSaveRef.current(nextPayload))
+        .then((saved) => {
+          if (saved) {
+            lastSavedPayloadRef.current = nextPayloadSnapshot;
+          }
+        })
+        .catch(() => {});
     }, NODE_AUTOSAVE_DELAY_MS);
 
     return () => {
-      if (autosaveTimeoutRef.current) {
-        clearTimeout(autosaveTimeoutRef.current);
-        autosaveTimeoutRef.current = null;
-      }
+      clearAutosaveScheduling();
     };
-  }, [draft, onSave, selected, subprocessTriggerText]);
+  }, [draft, selectedKind, selectedNodeId, subprocessTriggerText, filterEventRuleText, reverseOutputRuleText]);
 
   const handleFormatSubprocessTrigger = () => {
     try {
@@ -1794,52 +2278,35 @@ function NodeEditor({
     }
   };
 
+  const handleFormatFilterEventRule = () => {
+    try {
+      const rawFilterEventRule = filterEventRuleText.trim();
+      const parsedFilterEventRule = rawFilterEventRule ? JSON.parse(rawFilterEventRule) : {};
+      setFilterEventRuleText(JSON.stringify(parsedFilterEventRule, null, 2));
+      setFilterEventRuleError('');
+      setFilterEventRuleStatus('valid');
+    } catch {
+      setFilterEventRuleError('Filter event rule должен быть валидным JSON, чтобы его можно было форматировать.');
+      setFilterEventRuleStatus('invalid');
+    }
+  };
+
+  const handleFormatReverseOutputRule = () => {
+    try {
+      const rawRule = reverseOutputRuleText.trim();
+      const parsedRule = rawRule ? JSON.parse(rawRule) : {};
+      setReverseOutputRuleText(JSON.stringify(parsedRule, null, 2));
+      setReverseOutputRuleError('');
+      setReverseOutputRuleStatus('valid');
+    } catch {
+      setReverseOutputRuleError('Правило должно быть валидным JSON, чтобы его можно было форматировать.');
+      setReverseOutputRuleStatus('invalid');
+    }
+  };
+
   if (!selected) {
     return null;
   }
-
-  const orderedStages =
-    selected.kind === 'subprocess'
-      ? stageOrder
-          .map((stageId) => (selected.node?.stages ?? []).find((stage) => String(stage.id) === stageId))
-          .filter(Boolean)
-      : [];
-
-  const handlePointerDown = (stageId) => {
-    setDraggedStageId(stageId);
-  };
-
-  const handlePointerEnter = (targetStageId) => {
-    if (!draggedStageId || draggedStageId === targetStageId) {
-      return;
-    }
-
-    const currentOrder = stageOrderRef.current;
-    const fromIndex = currentOrder.indexOf(draggedStageId);
-    const toIndex = currentOrder.indexOf(targetStageId);
-    if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) {
-      return;
-    }
-
-    const nextOrder = reorderItems(currentOrder, fromIndex, toIndex);
-    stageOrderRef.current = nextOrder;
-    setStageOrder(nextOrder);
-  };
-
-  const handlePointerUp = async () => {
-    const nextStageOrder = [...stageOrderRef.current];
-    setDraggedStageId(null);
-
-    if (selected.kind !== 'subprocess' || !selected.node?.id) {
-      return;
-    }
-
-    if (nextStageOrder.join('|') === selectedSubprocessStageIds) {
-      return;
-    }
-
-    await onReorderStages(String(selected.node.id), nextStageOrder);
-  };
 
   const updateDraftPath = (path, value) => {
     setDraft((current) => updateNestedValue(current, path, value));
@@ -1876,23 +2343,28 @@ function NodeEditor({
     });
   };
 
+  const updateResultInputScenario = (index, value) => {
+    setDraft((current) => {
+      const targetArray = current.inputScenarios?.length ? [...current.inputScenarios] : [''];
+      targetArray[index] = value;
+      return {
+        ...current,
+        inputScenarios: targetArray,
+      };
+    });
+  };
+
   const createDefaultResult = () => ({
-    nodeName: `result_${(selected?.stage?.configurator?.result ?? []).length + 1 || 1}`,
-    nodeComment: 'добавьте комментарий',
     inputScenarios: [],
     reverse: [],
   });
 
   const createDefaultReverse = () => ({
-    nodeName: 'reverse_1',
-    nodeComment: 'добавьте комментарий',
     status: { code: '' },
     output: [],
   });
 
   const createDefaultOutput = () => ({
-    nodeName: 'reverseOutput_1',
-    nodeComment: 'добавьте комментарий',
     phase: { code: '' },
     name: '',
     rule: '',
@@ -1922,11 +2394,13 @@ function NodeEditor({
       ? `Процесс ${selected.node?.nodeName ?? ''}`.trim()
       : selected.kind === 'subprocess'
       ? `Подпроцесс ${selected.node?.nodeName ?? ''}`.trim()
-      : `Свойства: ${selected.kind}`;
+      : selected.kind === 'reverseOutput'
+      ? ''
+      : selected.node?.nodeName?.trim() || selected.kind;
 
   return (
     <Card className="editor-card">
-      <CardTitle>{editorTitle}</CardTitle>
+      {editorTitle && <CardTitle>{editorTitle}</CardTitle>}
       <CardBody>
         <Form>
           {(selected.kind === 'process' || selected.kind === 'subprocess') && (
@@ -1939,7 +2413,7 @@ function NodeEditor({
                         ? 'Название процесса'
                         : selected.kind === 'subprocess'
                           ? 'Название подпроцесса'
-                          : 'Node name'
+                          : 'Название'
                     }
                     fieldId="process-node-name"
                   >
@@ -1949,10 +2423,10 @@ function NodeEditor({
                       onChange={(_, value) => setDraft((current) => ({ ...current, nodeName: value }))}
                     />
                     {selected.kind === 'process' && (
-                      <Text component="small">Название процесса необходимо для визуальной идентификации</Text>
+                      <Text component="small">Название процесса необходимо для визуальной идентификации.</Text>
                     )}
                     {selected.kind === 'subprocess' && (
-                      <Text component="small">Название подпроцесса необходимо для визуальной идентификации</Text>
+                      <Text component="small">Название подпроцесса необходимо для визуальной идентификации.</Text>
                     )}
                   </FormGroup>
                   <FormGroup
@@ -1961,7 +2435,7 @@ function NodeEditor({
                         ? 'Описание процесса'
                         : selected.kind === 'subprocess'
                           ? 'Описание подпроцесса'
-                          : 'Node comment'
+                          : 'Описание'
                     }
                     fieldId="process-node-comment"
                   >
@@ -1972,125 +2446,157 @@ function NodeEditor({
                       resizeOrientation="vertical"
                     />
                     {selected.kind === 'process' && (
-                      <Text component="small">Описание процесса необходимо для описания назначения процесса</Text>
+                      <Text component="small">Описание процесса необходимо для описания назначения процесса.</Text>
                     )}
                     {selected.kind === 'subprocess' && (
-                      <Text component="small">Название подпроцесса необходимо для описания назначения подпроцесса</Text>
+                      <Text component="small">Описание подпроцесса необходимо для описания назначения подпроцесса.</Text>
                     )}
                   </FormGroup>
                 </>
               )}
-              <FormGroup
-                label={selected.kind === 'process' || selected.kind === 'subprocess' ? 'Код процесса' : 'Context code'}
-                fieldId="node-context-code"
-              >
-                <ProcessSelectField
-                  id="node-context-code"
-                  value={draft.contextCode?.code ?? ''}
-                  onChange={(next) => updateDraftPath(['contextCode', 'code'], next)}
-                  options={contextCodeOptions}
-                  placeholder="Выберите context code"
-                />
-                {(selected.kind === 'process' || selected.kind === 'subprocess') && (
+              {selected.kind === 'process' && (
+                <FormGroup label="Код процесса" fieldId="node-context-code">
+                  <ProcessSelectField
+                    id="node-context-code"
+                    value={draft.contextCode?.code ?? ''}
+                    onChange={(next) => updateDraftPath(['contextCode', 'code'], next)}
+                    options={contextCodeOptions}
+                    placeholder="Выберите context code"
+                  />
                   <Text component="small">
                     Код процесса необязателен. Установить в случае необходимости использования в конкретной реализации
                     информации о коде процесса
                   </Text>
-                )}
-              </FormGroup>
+                </FormGroup>
+              )}
             </>
           )}
 
           {selected.kind === 'stage' && (
             <>
-              <FormGroup label="Executor" fieldId="stage-executor">
+              <FormGroup label="Исполнитель" fieldId="stage-executor">
                 <TextInput
                   id="stage-executor"
                   value={draft.executor ?? ''}
                   onChange={(_, value) => setDraft((current) => ({ ...current, executor: value }))}
                 />
               </FormGroup>
-              <FormGroup label="Node name" fieldId="stage-node-name">
+              <FormGroup label="Название" fieldId="stage-node-name">
                 <TextInput
                   id="stage-node-name"
                   value={draft.nodeName ?? ''}
                   onChange={(_, value) => setDraft((current) => ({ ...current, nodeName: value }))}
                 />
+                <Text component="small">{NODE_NAME_HELPER_TEXT}</Text>
               </FormGroup>
-              <FormGroup label="Node comment" fieldId="stage-node-comment">
+              <FormGroup label="Описание" fieldId="stage-node-comment">
                 <TextArea
                   id="stage-node-comment"
                   value={draft.nodeComment ?? ''}
                   onChange={(_, value) => setDraft((current) => ({ ...current, nodeComment: value }))}
                   resizeOrientation="vertical"
                 />
-              </FormGroup>
-              <FormGroup label="Context code" fieldId="stage-context-code">
-                <ProcessSelectField
-                  id="stage-context-code"
-                  value={draft.contextCode?.code ?? ''}
-                  onChange={(next) => updateDraftPath(['contextCode', 'code'], next)}
-                  options={contextCodeOptions}
-                  placeholder="Выберите context code"
-                />
+                <Text component="small">{NODE_COMMENT_HELPER_TEXT}</Text>
               </FormGroup>
               <div className="stage-editor-section">
-                <Title headingLevel="h4">Stage log</Title>
-                <FormGroup label="Journal service name" fieldId="stage-log-journal">
-                  <TextInput
-                    id="stage-log-journal"
-                    value={draft.log?.journalServiceName ?? ''}
-                    onChange={(_, value) => updateDraftPath(['log', 'journalServiceName'], value)}
-                  />
-                </FormGroup>
+                <div className="stage-editor-inline-header">
+                  <Title headingLevel="h4">Правило JsonLogic</Title>
+                  <span
+                    className={
+                      filterEventRuleStatus === 'valid'
+                        ? 'json-status json-status-valid'
+                        : 'json-status json-status-invalid'
+                    }
+                  >
+                    {filterEventRuleStatus === 'valid' ? (
+                      <CheckVerified02 aria-hidden size={16} />
+                    ) : (
+                      <XCircle aria-hidden size={16} />
+                    )}
+                    {filterEventRuleStatus === 'valid' ? 'JSON валиден' : 'JSON невалиден'}
+                  </span>
+                </div>
+                <JsonSnippetEditor
+                  id="stage-filter-event-rule"
+                  value={filterEventRuleText}
+                  onChange={(value) => {
+                    setFilterEventRuleText(value);
+                  }}
+                  helperText="Редактируйте Filter event rule как JSON. Для выравнивания отступов используйте кнопку форматирования."
+                  error={filterEventRuleError}
+                />
+                <Text component="small">
+                  Каждое событие, необходимое для фильтрации, будет проверено данным правилом. Если событие будет
+                  проходить по данному правилу, то оно будет обработано, в ином случае стадия будет проигнорирована.
+                </Text>
+                <div className="json-status-actions">
+                  <Button variant="secondary" onClick={handleFormatFilterEventRule}>
+                    Форматировать JSON
+                  </Button>
+                </div>
               </div>
               <div className="stage-editor-section">
-                <Title headingLevel="h4">Configurator</Title>
+                <Title headingLevel="h4">Настройка состояния стадии</Title>
                 <div className="stage-editor-grid">
-                  <Checkbox
-                    id="stage-configurator-disabled"
-                    isChecked={Boolean(draft.configurator?.disabled)}
-                    onChange={(_, checked) => updateDraftPath(['configurator', 'disabled'], checked)}
-                    label="Disabled"
-                  />
-                  <Checkbox
-                    id="stage-configurator-interrupted"
-                    isChecked={Boolean(draft.configurator?.interrupted)}
-                    onChange={(_, checked) => updateDraftPath(['configurator', 'interrupted'], checked)}
-                    label="Interrupted"
-                  />
-                  <Checkbox
-                    id="stage-configurator-multiple"
-                    isChecked={Boolean(draft.configurator?.multiple)}
-                    onChange={(_, checked) => updateDraftPath(['configurator', 'multiple'], checked)}
-                    label="Multiple"
-                  />
-                </div>
-                <FormGroup label="Filter event rule" fieldId="stage-filter-event-rule">
-                  <TextInput
-                    id="stage-filter-event-rule"
-                    value={draft.configurator?.filterEventRule ?? ''}
-                    onChange={(_, value) => updateDraftPath(['configurator', 'filterEventRule'], value)}
-                  />
-                </FormGroup>
-                <div className="stage-editor-subsection">
-                  <Title headingLevel="h5">Audit</Title>
-                  <div className="stage-editor-grid">
+                  <div className="stage-toggle-option">
                     <Checkbox
-                      id="stage-audit-enabled"
-                      isChecked={Boolean(draft.configurator?.audit?.enabled)}
-                      onChange={(_, checked) => updateDraftPath(['configurator', 'audit', 'enabled'], checked)}
-                      label="Enabled"
+                      id="stage-configurator-disabled"
+                      isChecked={Boolean(draft.configurator?.disabled)}
+                      onChange={(_, checked) => updateDraftPath(['configurator', 'disabled'], checked)}
+                      label="Выключить"
                     />
+                    <Text component="small" className="stage-toggle-option__hint">
+                      При выключении стадия не будет обрабатывать поступающие события.
+                    </Text>
                   </div>
-                  <FormGroup label="Event code" fieldId="stage-audit-event-code">
+                  <div className="stage-toggle-option">
+                    <Checkbox
+                      id="stage-configurator-interrupted"
+                      isChecked={Boolean(draft.configurator?.interrupted)}
+                      onChange={(_, checked) => updateDraftPath(['configurator', 'interrupted'], checked)}
+                      label="Прерываемая"
+                    />
+                    <Text component="small" className="stage-toggle-option__hint">
+                      Прерываемая стадия будет завершать весь подпроцесс при возникновении исключения, в ином случае
+                      исключение будет проигнорировано и выполнение стадии с исключением не приведет к остановке
+                      исполнения.
+                    </Text>
+                  </div>
+                  <div className="stage-toggle-option">
+                    <Checkbox
+                      id="stage-configurator-multiple"
+                      isChecked={Boolean(draft.configurator?.multiple)}
+                      onChange={(_, checked) => updateDraftPath(['configurator', 'multiple'], checked)}
+                      label="Множественная обработка"
+                    />
+                    <Text component="small" className="stage-toggle-option__hint">
+                      Может применять множество событий, подходящих под фильтр.
+                    </Text>
+                  </div>
+                </div>
+                <div className="stage-editor-subsection">
+                  <Title headingLevel="h5">Настройка аудита</Title>
+                  <div className="stage-editor-grid">
+                    <div className="stage-toggle-option">
+                      <Checkbox
+                        id="stage-audit-enabled"
+                        isChecked={Boolean(draft.configurator?.audit?.enabled)}
+                        onChange={(_, checked) => updateDraftPath(['configurator', 'audit', 'enabled'], checked)}
+                        label="Включить"
+                      />
+                      <Text component="small" className="stage-toggle-option__hint">
+                        При включении аудит будет записывать информацию по обработке событий для данной стадии.
+                      </Text>
+                    </div>
+                  </div>
+                  <FormGroup label="Код события" fieldId="stage-audit-event-code">
                     <TextInput
                       id="stage-audit-event-code"
                       value={draft.configurator?.audit?.eventCode ?? ''}
                       onChange={(_, value) => updateDraftPath(['configurator', 'audit', 'eventCode'], value)}
                     />
                   </FormGroup>
-                  <FormGroup label="Event description" fieldId="stage-audit-event-description">
+                  <FormGroup label="Описание события" fieldId="stage-audit-event-description">
                     <TextInput
                       id="stage-audit-event-description"
                       value={draft.configurator?.audit?.eventDescription ?? ''}
@@ -2098,42 +2604,16 @@ function NodeEditor({
                     />
                   </FormGroup>
                 </div>
-                <div className="stage-editor-subsection">
-                  <div className="stage-editor-inline-header">
-                    <Title headingLevel="h5">Results</Title>
-                  </div>
-                  <Text component="small">Result создаётся через `+` на node stage и редактируется как отдельный узел.</Text>
-                  <FormGroup label="Массовое создание results" fieldId="bulk-results-create-stage">
-                    <TextArea
-                      id="bulk-results-create-stage"
-                      value={bulkResultInput}
-                      onChange={(_, value) => setBulkResultInput(value)}
-                      placeholder={'Каждый result отделяйте пустой строкой.\nВнутри блока каждая строка станет inputScenario.'}
-                      resizeOrientation="vertical"
-                    />
-                  </FormGroup>
-                  <Button
-                    variant="secondary"
-                    isLoading={isSaving}
-                    isDisabled={!bulkResultInput.trim()}
-                    onClick={async () => {
-                      const groups = bulkResultInput
-                        .trim()
-                        .split(/\n\s*\n/)
-                        .map((group) => group.split('\n').map((item) => item.trim()).filter(Boolean))
-                        .filter((group) => group.length > 0);
-
-                      if (groups.length === 0) {
-                        return;
-                      }
-
-                      await onBulkCreateResults(selectedNodeId, groups);
-                      setBulkResultInput('');
-                    }}
-                  >
-                    Создать results массово
-                  </Button>
-                </div>
+              </div>
+              <div className="stage-editor-section">
+                <Title headingLevel="h4">Настройки логирования</Title>
+                <FormGroup label="Название в интеграционном журнале" fieldId="stage-log-journal">
+                  <TextInput
+                    id="stage-log-journal"
+                    value={draft.log?.journalServiceName ?? ''}
+                    onChange={(_, value) => updateDraftPath(['log', 'journalServiceName'], value)}
+                  />
+                </FormGroup>
               </div>
             </>
           )}
@@ -2174,75 +2654,37 @@ function NodeEditor({
             </div>
           )}
 
-          {selected.kind === 'subprocess' && (
-            <div className="stage-order-panel">
-              <div className="stage-order-panel__header">
-                <Title headingLevel="h4">Порядок исполнения стадий</Title>
-                <Text component="small">Перетащите стадию. После отпускания порядок сохранится сразу.</Text>
-              </div>
-              <div className="stage-order-list">
-                {orderedStages.map((stage, index) => {
-                  const stageId = String(stage.id);
-                  return (
-                    <button
-                      key={stageId}
-                      type="button"
-                      className={draggedStageId === stageId ? 'stage-order-item dragging' : 'stage-order-item'}
-                      onPointerDown={() => handlePointerDown(stageId)}
-                      onPointerEnter={() => handlePointerEnter(stageId)}
-                      onPointerUp={handlePointerUp}
-                      onPointerLeave={(event) => {
-                        if (event.buttons === 0 && draggedStageId) {
-                          handlePointerUp();
-                        }
-                      }}
-                    >
-                      <span className="stage-order-item__index">{index + 1}</span>
-                      <span className="stage-order-item__content">
-                        <strong>{stage.executor || 'stage'}</strong>
-                        <small>{stage.description || 'Без описания'}</small>
-                      </span>
-                      <span className="stage-order-item__handle">::</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
           {selected.kind === 'result' && (
             <div className="stage-editor-section">
               <Title headingLevel="h4">Result</Title>
-              <FormGroup label="Node name" fieldId="result-node-name">
-                <TextInput
-                  id="result-node-name"
-                  value={draft.nodeName ?? ''}
-                  onChange={(_, value) => setDraft((current) => ({ ...current, nodeName: value }))}
-                />
-              </FormGroup>
-              <FormGroup label="Node comment" fieldId="result-node-comment">
-                <TextArea
-                  id="result-node-comment"
-                  value={draft.nodeComment ?? ''}
-                  onChange={(_, value) => setDraft((current) => ({ ...current, nodeComment: value }))}
-                  resizeOrientation="vertical"
-                />
-              </FormGroup>
-              <FormGroup label="Input scenarios" fieldId="result-input-scenarios">
-                <TextArea
-                  id="result-input-scenarios"
-                  value={(draft.inputScenarios ?? []).join('\n')}
-                  onChange={(_, value) =>
-                    setDraft((current) => ({
-                      ...current,
-                      inputScenarios: value
-                        .split('\n')
-                        .map((item) => item.trim())
-                        .filter(Boolean),
-                    }))
-                  }
-                  resizeOrientation="vertical"
-                />
+              <FormGroup label="Обрабатываемые входящие сценарии" fieldId="result-input-scenarios-0">
+                <div className="space-y-3">
+                  {(draft.inputScenarios?.length ? draft.inputScenarios : ['']).map((scenario, index) => (
+                    <div key={`result-input-scenario-${index}`} className="flex items-center gap-3">
+                      <TextInput
+                        id={`result-input-scenarios-${index}`}
+                        value={scenario}
+                        placeholder="Введите сценарий"
+                        onChange={(_, value) => updateResultInputScenario(index, value)}
+                      />
+                      <Button
+                        variant="plain"
+                        aria-label={`Удалить сценарий ${index + 1}`}
+                        onClick={() => removeDraftArrayItem(['inputScenarios'], index)}
+                      >
+                        <Trash01 aria-hidden size={18} />
+                      </Button>
+                    </div>
+                  ))}
+                  <Button
+                    variant="secondary"
+                    onClick={() => addDraftArrayItem(['inputScenarios'], '')}
+                    className="w-full sm:w-auto"
+                  >
+                    <Plus aria-hidden size={18} />
+                    Добавить сценарий
+                  </Button>
+                </div>
               </FormGroup>
               <Text component="small">Для этого node сейчас отображается отдельное редактирование result. Reverse и output остаются в данных результата.</Text>
             </div>
@@ -2251,26 +2693,11 @@ function NodeEditor({
           {selected.kind === 'reverse' && (
             <div className="stage-editor-section">
               <Title headingLevel="h4">Reverse</Title>
-              <FormGroup label="Node name" fieldId="reverse-node-name">
-                <TextInput
-                  id="reverse-node-name"
-                  value={draft.nodeName ?? ''}
-                  onChange={(_, value) => setDraft((current) => ({ ...current, nodeName: value }))}
-                />
-              </FormGroup>
-              <FormGroup label="Node comment" fieldId="reverse-node-comment">
-                <TextArea
-                  id="reverse-node-comment"
-                  value={draft.nodeComment ?? ''}
-                  onChange={(_, value) => setDraft((current) => ({ ...current, nodeComment: value }))}
-                  resizeOrientation="vertical"
-                />
-              </FormGroup>
               <FormGroup label="STATUS" fieldId="reverse-status-code">
-                <TextInput
+                <ProcessSelectField
                   id="reverse-status-code"
                   value={draft.status?.code ?? ''}
-                  onChange={(_, value) =>
+                  onChange={(value) =>
                     setDraft((current) => ({
                       ...current,
                       status: {
@@ -2279,30 +2706,16 @@ function NodeEditor({
                       },
                     }))
                   }
+                  options={b3StatusOptions}
+                  placeholder="Выберите STATUS"
                 />
               </FormGroup>
             </div>
           )}
 
           {selected.kind === 'reverseOutput' && (
-            <div className="stage-editor-section">
-              <Title headingLevel="h4">ReverseOutput</Title>
-              <FormGroup label="Node name" fieldId="reverse-output-node-name">
-                <TextInput
-                  id="reverse-output-node-name"
-                  value={draft.nodeName ?? ''}
-                  onChange={(_, value) => updateReverseOutputDraft((current) => ({ ...current, nodeName: value }))}
-                />
-              </FormGroup>
-              <FormGroup label="Node comment" fieldId="reverse-output-node-comment">
-                <TextArea
-                  id="reverse-output-node-comment"
-                  value={draft.nodeComment ?? ''}
-                  onChange={(_, value) => updateReverseOutputDraft((current) => ({ ...current, nodeComment: value }))}
-                  resizeOrientation="vertical"
-                />
-              </FormGroup>
-              <FormGroup label="Phase" fieldId="reverse-output-phase">
+            <div className="stage-editor-section reverse-output-editor-section">
+              <FormGroup label="Тип события" fieldId="reverse-output-phase">
                 <ProcessSelectField
                   id="reverse-output-phase"
                   value={draft.phase?.code ?? ''}
@@ -2316,26 +2729,59 @@ function NodeEditor({
                     }))
                   }
                   options={phaseOptions}
-                  placeholder="Выберите phase"
+                  placeholder="Выберите тип события"
                 />
+                <Text component="small">
+                  Определяет, какой тип события будет отправлен в B3 Adapter.
+                </Text>
               </FormGroup>
-              <FormGroup label="Name" fieldId="reverse-output-name">
+              <FormGroup label="Идентификационное имя" fieldId="reverse-output-name">
                 <TextInput
                   id="reverse-output-name"
                   value={draft.name ?? ''}
                   onChange={(_, value) => updateReverseOutputDraft((current) => ({ ...current, name: value }))}
                 />
-              </FormGroup>
-              <FormGroup label="Rule" fieldId="reverse-output-rule">
-                <TextInput
-                  id="reverse-output-rule"
-                  value={draft.rule ?? ''}
-                  onChange={(_, value) => updateReverseOutputDraft((current) => ({ ...current, rule: value }))}
-                />
+                <Text component="small">
+                  Позволяет определить строковой идентификатор события. Это имя можно использовать в коде при
+                  отправке события для выбора нужной конфигурации.
+                </Text>
               </FormGroup>
               <div className="stage-editor-subsection">
-                <Title headingLevel="h5">Body</Title>
-                <FormGroup label="Body type" fieldId="reverse-output-body-type">
+                <div className="stage-editor-inline-header">
+                  <Title headingLevel="h5">Правило JsonLogic</Title>
+                  <span
+                    className={
+                      reverseOutputRuleStatus === 'valid'
+                        ? 'json-status json-status-valid'
+                        : 'json-status json-status-invalid'
+                    }
+                  >
+                    {reverseOutputRuleStatus === 'valid' ? (
+                      <CheckVerified02 aria-hidden size={16} />
+                    ) : (
+                      <XCircle aria-hidden size={16} />
+                    )}
+                    {reverseOutputRuleStatus === 'valid' ? 'JSON валиден' : 'JSON невалиден'}
+                  </span>
+                </div>
+                <JsonSnippetEditor
+                  id="reverse-output-rule"
+                  value={reverseOutputRuleText}
+                  onChange={(value) => {
+                    setReverseOutputRuleText(value);
+                  }}
+                  helperText="Редактируйте правило для отправляемого события как JSON. Для выравнивания отступов используйте кнопку форматирования."
+                  error={reverseOutputRuleError}
+                />
+                <div className="json-status-actions">
+                  <Button variant="secondary" onClick={handleFormatReverseOutputRule}>
+                    Форматировать JSON
+                  </Button>
+                </div>
+              </div>
+              <div className="stage-editor-subsection">
+                <Title headingLevel="h5">B3Event Body</Title>
+                <FormGroup label="B3Event.body.type" fieldId="reverse-output-body-type">
                   <TextInput
                     id="reverse-output-body-type"
                     value={draft.body?.type ?? ''}
@@ -2350,7 +2796,7 @@ function NodeEditor({
                     }
                   />
                 </FormGroup>
-                <FormGroup label="Event object type" fieldId="reverse-output-event-object-type">
+                <FormGroup label="B3Event.body.status" fieldId="reverse-output-event-object-type">
                   <TextInput
                     id="reverse-output-event-object-type"
                     value={draft.body?.eventObject?.type ?? ''}
@@ -2370,8 +2816,8 @@ function NodeEditor({
                 </FormGroup>
               </div>
               <div className="stage-editor-subsection">
-                <Title headingLevel="h5">Service</Title>
-                <FormGroup label="Service scenario" fieldId="reverse-output-service-scenario">
+                <Title headingLevel="h5">B3Event Service</Title>
+                <FormGroup label="B3Event.body.service.scenario" fieldId="reverse-output-service-scenario">
                   <TextInput
                     id="reverse-output-service-scenario"
                     value={draft.body?.service?.scenario ?? ''}
@@ -2389,7 +2835,7 @@ function NodeEditor({
                     }
                   />
                 </FormGroup>
-                <FormGroup label="Service status" fieldId="reverse-output-service-status">
+                <FormGroup label="B3Event.body.service.status" fieldId="reverse-output-service-status">
                   <TextInput
                     id="reverse-output-service-status"
                     value={draft.body?.service?.status ?? ''}
@@ -2410,10 +2856,12 @@ function NodeEditor({
               </div>
               <div className="stage-editor-subsection">
                 <Title headingLevel="h5">SLA</Title>
-                <FormGroup label="SLA duration value" fieldId="reverse-output-sla-duration-value">
+                <FormGroup label="B3Event.body.service.slaState.durationValue" fieldId="reverse-output-sla-duration-value">
                   <TextInput
                     id="reverse-output-sla-duration-value"
                     value={draft.body?.service?.sla?.durationValue ?? ''}
+                    inputMode="numeric"
+                    pattern="[0-9]*"
                     onChange={(_, value) =>
                       updateReverseOutputDraft((current) => ({
                         ...current,
@@ -2423,19 +2871,20 @@ function NodeEditor({
                             ...(current.body?.service ?? {}),
                             sla: {
                               ...(current.body?.service?.sla ?? {}),
-                              durationValue: value,
+                              durationValue: value.replace(/\D/g, ''),
                             },
                           },
                         },
                       }))
                     }
                   />
+                  <Text component="small">Это значение длительности SLA.</Text>
                 </FormGroup>
-                <FormGroup label="SLA duration unit code" fieldId="reverse-output-sla-duration-unit">
-                  <TextInput
+                <FormGroup label="B3Event.body.service.slaState.durationUnit" fieldId="reverse-output-sla-duration-unit">
+                  <ProcessSelectField
                     id="reverse-output-sla-duration-unit"
                     value={draft.body?.service?.sla?.durationUnit?.code ?? ''}
-                    onChange={(_, value) =>
+                    onChange={(value) =>
                       updateReverseOutputDraft((current) => ({
                         ...current,
                         body: {
@@ -2453,9 +2902,12 @@ function NodeEditor({
                         },
                       }))
                     }
+                    options={slaDurationUnitOptions}
+                    placeholder="Выберите единицу длительности SLA"
                   />
+                  <Text component="small">Это единица длительности SLA.</Text>
                 </FormGroup>
-                <FormGroup label="SLA status code" fieldId="reverse-output-sla-status">
+                <FormGroup label="B3Event.body.service.slaState.status" fieldId="reverse-output-sla-status">
                   <ProcessSelectField
                     id="reverse-output-sla-status"
                     value={draft.body?.service?.sla?.status?.code ?? ''}
@@ -2478,13 +2930,14 @@ function NodeEditor({
                       }))
                     }
                     options={slaStatusOptions}
-                    placeholder="Выберите SLA status"
+                    placeholder="Выберите статус SLA"
                   />
+                  <Text component="small">Это статус SLA.</Text>
                 </FormGroup>
               </div>
               <div className="stage-editor-subsection">
-                <Title headingLevel="h5">EventLog</Title>
-                <FormGroup label="Journal service name" fieldId="reverse-output-log-journal">
+                <Title headingLevel="h5">Настройки интеграционного журналирования</Title>
+                <FormGroup label="Название сервиса" fieldId="reverse-output-log-journal">
                   <TextInput
                     id="reverse-output-log-journal"
                     value={draft.log?.journalServiceName ?? ''}
@@ -2498,8 +2951,11 @@ function NodeEditor({
                       }))
                     }
                   />
+                  <Text component="small">
+                    С данным названием сервиса в интеграционном журнале будет добавлена запись отправленного события.
+                  </Text>
                 </FormGroup>
-                <FormGroup label="Message" fieldId="reverse-output-log-message">
+                <FormGroup label="Сообщение" fieldId="reverse-output-log-message">
                   <TextArea
                     id="reverse-output-log-message"
                     value={draft.log?.message ?? ''}
@@ -2514,20 +2970,239 @@ function NodeEditor({
                     }
                     resizeOrientation="vertical"
                   />
+                  <Text component="small">
+                    Данное сообщение будет добавлено к записи отправленного события в интеграционном журнале.
+                  </Text>
                 </FormGroup>
               </div>
             </div>
           )}
 
           <div className="editor-actions">
-            <Text component="small">{isSaving ? 'Сохранение…' : 'Изменения сохраняются автоматически через 5 секунд.'}</Text>
-            {selected.kind === 'subprocess' && (
-              <Button variant="secondary" onClick={onAddStage} isLoading={isSaving}>
-                Добавить stage
-              </Button>
-            )}
           </div>
         </Form>
+      </CardBody>
+    </Card>
+  );
+}
+
+function StageOrderEditor({ processConfig, subprocessNodeId, onReorderStages, isSaving }) {
+  const selected = findSelectedNode(processConfig, subprocessNodeId);
+  const [stageOrder, setStageOrder] = useState([]);
+  const [draggedStageId, setDraggedStageId] = useState(null);
+  const stageOrderRef = useRef([]);
+  const selectedSubprocessStageIds =
+    selected?.kind === 'subprocess' ? (selected.node?.stages ?? []).map((stage) => String(stage.id)).join('|') : '';
+
+  useEffect(() => {
+    if (selected?.kind !== 'subprocess') {
+      setStageOrder([]);
+      stageOrderRef.current = [];
+      setDraggedStageId(null);
+      return;
+    }
+
+    const nextStageOrder = (selected.node?.stages ?? []).map((stage) => String(stage.id));
+    setStageOrder(nextStageOrder);
+    stageOrderRef.current = nextStageOrder;
+    setDraggedStageId(null);
+  }, [subprocessNodeId, selected?.kind, selectedSubprocessStageIds]);
+
+  const orderedStages =
+    selected?.kind === 'subprocess'
+      ? stageOrder
+          .map((stageId) => (selected.node?.stages ?? []).find((stage) => String(stage.id) === stageId))
+          .filter(Boolean)
+      : [];
+
+  const handlePointerDown = (stageId) => {
+    setDraggedStageId(stageId);
+  };
+
+  const handlePointerEnter = (targetStageId) => {
+    if (!draggedStageId || draggedStageId === targetStageId) {
+      return;
+    }
+
+    const currentOrder = stageOrderRef.current;
+    const fromIndex = currentOrder.indexOf(draggedStageId);
+    const toIndex = currentOrder.indexOf(targetStageId);
+    if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) {
+      return;
+    }
+
+    const nextOrder = reorderItems(currentOrder, fromIndex, toIndex);
+    stageOrderRef.current = nextOrder;
+    setStageOrder(nextOrder);
+  };
+
+  const handlePointerUp = async () => {
+    const nextStageOrder = [...stageOrderRef.current];
+    setDraggedStageId(null);
+
+    if (selected?.kind !== 'subprocess' || !selected.node?.id) {
+      return;
+    }
+
+    if (nextStageOrder.join('|') === selectedSubprocessStageIds) {
+      return;
+    }
+
+    await onReorderStages(String(selected.node.id), nextStageOrder);
+  };
+
+  if (selected?.kind !== 'subprocess') {
+    return null;
+  }
+
+  return (
+    <Card className="editor-card">
+      <CardBody>
+        <div className="stage-order-panel stage-order-panel-standalone">
+          <div className="stage-order-list">
+            {orderedStages.map((stage, index) => {
+              const stageId = String(stage.id);
+              return (
+                <button
+                  key={stageId}
+                  type="button"
+                  disabled={isSaving}
+                  className={draggedStageId === stageId ? 'stage-order-item dragging' : 'stage-order-item'}
+                  onPointerDown={() => handlePointerDown(stageId)}
+                  onPointerEnter={() => handlePointerEnter(stageId)}
+                  onPointerUp={handlePointerUp}
+                  onPointerLeave={(event) => {
+                    if (event.buttons === 0 && draggedStageId) {
+                      handlePointerUp();
+                    }
+                  }}
+                >
+                  <span className="stage-order-item__index">{index + 1}</span>
+                  <span className="stage-order-item__content">
+                    <strong>{stage.executor || 'stage'}</strong>
+                    <small>{stage.nodeComment || 'Без описания'}</small>
+                  </span>
+                  <span className="stage-order-item__handle">::</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </CardBody>
+    </Card>
+  );
+}
+
+function NodeViewer({ processConfig, selectedNodeId }) {
+  const selected = findSelectedNode(processConfig, selectedNodeId);
+
+  if (!selected) {
+    return null;
+  }
+
+  const title =
+    selected.kind === 'process'
+      ? 'Просмотр процесса'
+      : selected.kind === 'subprocess'
+      ? 'Просмотр подпроцесса'
+      : selected.kind === 'stage'
+      ? 'Просмотр stage'
+      : selected.kind === 'result'
+      ? 'Просмотр result'
+      : selected.kind === 'reverse'
+      ? 'Просмотр reverse'
+      : 'Просмотр reverse output';
+
+  const node = selected.node;
+
+  return (
+    <Card className="editor-card">
+      <CardTitle>{title}</CardTitle>
+      <CardBody className="space-y-4">
+        {selected.kind === 'process' && (
+          <>
+            <StaticField label="Название процесса" value={node.nodeName || '—'} />
+            <StaticField label="Описание процесса" value={node.nodeComment || '—'} />
+            <StaticField label="Код процесса" value={node.contextCode?.code || '—'} />
+          </>
+        )}
+
+        {selected.kind === 'subprocess' && (
+          <>
+            <StaticField label="Название подпроцесса" value={node.nodeName || '—'} />
+            <StaticField label="Описание подпроцесса" value={node.nodeComment || '—'} />
+            <StaticJsonField label="JsonLogic правило запуска" value={node.trigger?.rule ?? ''} />
+          </>
+        )}
+
+        {selected.kind === 'stage' && (
+          <>
+            <StaticField label="Исполнитель" value={node.executor || '—'} />
+            <StaticField label="Название" value={node.nodeName || '—'} />
+            <StaticField label="Описание" value={node.nodeComment || '—'} />
+            <StaticJsonField label="Правило JsonLogic" value={node.configurator?.filterEventRule ?? ''} />
+            <div className="viewer-section">
+              <Title headingLevel="h5">Настройка состояния стадии</Title>
+              <StaticField label="Выключить" value={node.configurator?.disabled ? 'Да' : 'Нет'} />
+              <StaticField label="Прервать обработку" value={node.configurator?.interrupted ? 'Да' : 'Нет'} />
+              <StaticField label="Множественная обработка" value={node.configurator?.multiple ? 'Да' : 'Нет'} />
+            </div>
+            <div className="viewer-section">
+              <Title headingLevel="h5">Настройка аудита</Title>
+              <StaticField label="Включить" value={node.configurator?.audit?.enabled ? 'Да' : 'Нет'} />
+              <StaticField label="Код события" value={node.configurator?.audit?.eventCode || '—'} />
+              <StaticField label="Описание события" value={node.configurator?.audit?.eventDescription || '—'} />
+            </div>
+            <div className="viewer-section">
+              <Title headingLevel="h5">Настройки логирования</Title>
+              <StaticField label="Название в интеграционном журнале" value={node.log?.journalServiceName || '—'} />
+            </div>
+          </>
+        )}
+
+        {selected.kind === 'result' && (
+          <div className="viewer-section">
+            <Title headingLevel="h5">Обрабатываемые входящие сценарии</Title>
+            <div className="viewer-list">
+              {(node.inputScenarios?.length ? node.inputScenarios : ['—']).map((scenario, index) => (
+                <div key={`${scenario}-${index}`} className="viewer-list__item">{scenario}</div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {selected.kind === 'reverse' && (
+          <StaticField label="STATUS" value={node.status?.code ? formatReverseOutputEventType(node.status.code) : '—'} />
+        )}
+
+        {selected.kind === 'reverseOutput' && (
+          <>
+            <StaticField label="Тип события" value={node.phase?.code || '—'} />
+            <StaticField label="Идентификационное имя" value={node.name || '—'} />
+            <StaticJsonField label="Правило JsonLogic" value={node.rule ?? ''} />
+            <div className="viewer-section">
+              <Title headingLevel="h5">B3Event Body</Title>
+              <StaticField label="B3Event.body.type" value={node.body?.type || '—'} />
+              <StaticField label="B3Event.body.status" value={node.body?.eventObject?.type || '—'} />
+            </div>
+            <div className="viewer-section">
+              <Title headingLevel="h5">B3Event Service</Title>
+              <StaticField label="B3Event.body.service.scenario" value={node.body?.service?.scenario || '—'} />
+              <StaticField label="B3Event.body.service.status" value={node.body?.service?.status || '—'} />
+            </div>
+            <div className="viewer-section">
+              <Title headingLevel="h5">SLA</Title>
+              <StaticField label="B3Event.body.service.slaState.durationValue" value={node.body?.service?.sla?.durationValue ?? '—'} />
+              <StaticField label="B3Event.body.service.slaState.durationUnit" value={node.body?.service?.sla?.durationUnit?.code || '—'} />
+              <StaticField label="B3Event.body.service.slaState.status" value={node.body?.service?.sla?.status?.code || '—'} />
+            </div>
+            <div className="viewer-section">
+              <Title headingLevel="h5">Настройки интеграционного журналирования</Title>
+              <StaticField label="Название сервиса" value={node.log?.journalServiceName || '—'} />
+              <StaticField label="Сообщение" value={node.log?.message || '—'} />
+            </div>
+          </>
+        )}
       </CardBody>
     </Card>
   );
@@ -2544,10 +3219,22 @@ export function App() {
   const [updateStageNode, updateStageState] = useMutation(UPDATE_STAGE_NODE, {
     fetchPolicy: 'no-cache',
   });
+  const [updateConfiguratorNode, updateConfiguratorState] = useMutation(UPDATE_CONFIGURATOR_NODE, {
+    fetchPolicy: 'no-cache',
+  });
   const [updateSubprocessNode, updateSubprocessState] = useMutation(UPDATE_SUBPROCESS_NODE, {
     fetchPolicy: 'no-cache',
   });
+  const [reorderSubprocessStages, reorderSubprocessStagesState] = useMutation(REORDER_SUBPROCESS_STAGES, {
+    fetchPolicy: 'no-cache',
+  });
   const [updateProcessNode, updateProcessNodeState] = useMutation(UPDATE_PROCESS_NODE, {
+    fetchPolicy: 'no-cache',
+  });
+  const [createSubprocessNode, createSubprocessState] = useMutation(CREATE_SUBPROCESS_NODE, {
+    fetchPolicy: 'no-cache',
+  });
+  const [createStageNode, createStageState] = useMutation(CREATE_STAGE_NODE, {
     fetchPolicy: 'no-cache',
   });
   const [createResultNode, createResultState] = useMutation(CREATE_RESULT_NODE, {
@@ -2588,30 +3275,64 @@ export function App() {
   });
   const [selectedConfigId, setSelectedConfigId] = useState(null);
   const [selectedNodeId, setSelectedNodeId] = useState(null);
+  const [editorNodeId, setEditorNodeId] = useState(null);
+  const [viewerNodeId, setViewerNodeId] = useState(null);
+  const [stageOrderNodeId, setStageOrderNodeId] = useState(null);
   const [expandedNodeIds, setExpandedNodeIds] = useState([]);
   const [createErrorMessage, setCreateErrorMessage] = useState('');
   const [updateErrorMessage, setUpdateErrorMessage] = useState('');
+  const [exportErrorMessage, setExportErrorMessage] = useState('');
   const [isTopologyFullscreen, setIsTopologyFullscreen] = useState(false);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [localProcessConfig, setLocalProcessConfig] = useState(null);
+  const [editorPreview, setEditorPreview] = useState(null);
   const [toast, setToast] = useState(null);
+  const [isExportingProcessConfig, setIsExportingProcessConfig] = useState(false);
+  const [autosaveStatus, setAutosaveStatus] = useState(null);
   const topologyContainerRef = useRef(null);
 
   const processConfigs = data?.processConfigList ?? [];
   const isInitialLoading = loading && processConfigs.length === 0;
   const phaseOptions = (data?.actionPhasesDictionaryList ?? []).map((item) => item.code).filter(Boolean);
+  const b3StatusOptions = (data?.b3StatusDictionaryList ?? []).map((item) => item.code).filter(Boolean);
+  const slaDurationUnitOptions = (data?.slaDurationUnitDictionaryList ?? []).map((item) => item.code).filter(Boolean);
   const slaStatusOptions = (data?.slaStatusDictionaryList ?? []).map((item) => item.code).filter(Boolean);
   const processCodeOptions = (data?.contextCodesDictionaryList ?? []).map((item) => item.code).filter(Boolean);
   const processConfigOptions = processConfigs.map((item) => ({
     value: item.id,
     label: item.process?.contextCode?.code || item.process?.nodeName || `Process ${item.id}`,
   }));
+  const editorIsSaving =
+    createSubprocessState.loading ||
+    createStageState.loading ||
+    reorderSubprocessStagesState.loading ||
+    updateState.loading ||
+    updateStageState.loading ||
+    updateConfiguratorState.loading ||
+    updateSubprocessState.loading ||
+    updateProcessNodeState.loading ||
+    createResultState.loading ||
+    createReverseState.loading ||
+    updateReverseState.loading ||
+    updateResultState.loading ||
+    createReverseOutputState.loading ||
+    updateReverseOutputState.loading ||
+    deleteSubprocessState.loading ||
+    deleteStageState.loading ||
+    deleteConfiguratorState.loading ||
+    deleteResultState.loading ||
+    deleteReverseState.loading ||
+    deleteReverseOutputState.loading;
   const serverActiveProcessConfig =
     processConfigs.find((item) => item.id === selectedConfigId) ?? processConfigs[0] ?? null;
   const activeProcessConfig =
     localProcessConfig?.id && localProcessConfig.id === serverActiveProcessConfig?.id
       ? localProcessConfig
       : serverActiveProcessConfig;
+  const workingProcessConfig =
+    activeProcessConfig && editorNodeId && editorPreview?.nodeId === editorNodeId
+      ? updateSelectedNode(activeProcessConfig, editorNodeId, editorPreview.values)
+      : activeProcessConfig;
 
   useEffect(() => {
     if (!serverActiveProcessConfig) {
@@ -2628,6 +3349,11 @@ export function App() {
     if (activeProcessConfig && activeProcessConfig.id !== selectedConfigId) {
       setSelectedConfigId(activeProcessConfig.id);
       setSelectedNodeId(activeProcessConfig.process?.id ? `process:${activeProcessConfig.process.id}` : null);
+      setEditorNodeId(null);
+      setViewerNodeId(null);
+      setStageOrderNodeId(null);
+      setEditorPreview(null);
+      setAutosaveStatus(null);
       setExpandedNodeIds(getDefaultExpandedNodeIds(activeProcessConfig));
     }
   }, [activeProcessConfig, selectedConfigId]);
@@ -2685,8 +3411,12 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    setIsEditorOpen(Boolean(findSelectedNode(activeProcessConfig, selectedNodeId)));
-  }, [activeProcessConfig, selectedNodeId]);
+    setIsEditorOpen(Boolean(findSelectedNode(activeProcessConfig, editorNodeId)));
+  }, [activeProcessConfig, editorNodeId]);
+
+  useEffect(() => {
+    setEditorPreview(null);
+  }, [editorNodeId]);
 
   useEffect(() => {
     if (!toast) {
@@ -2705,10 +3435,42 @@ export function App() {
   const showSaveSuccessToast = () => {
     setToast({
       id: Date.now(),
+      variant: 'success',
       title: 'Изменения сохранены',
       message: 'Информация по node успешно обновлена.',
     });
   };
+
+  const showErrorToast = (message) => {
+    if (!message) {
+      return;
+    }
+
+    setToast({
+      id: Date.now(),
+      variant: 'error',
+      title: 'Ошибка',
+      message,
+    });
+  };
+
+  useEffect(() => {
+    if (createErrorMessage) {
+      showErrorToast(createErrorMessage);
+    }
+  }, [createErrorMessage]);
+
+  useEffect(() => {
+    if (updateErrorMessage) {
+      showErrorToast(updateErrorMessage);
+    }
+  }, [updateErrorMessage]);
+
+  useEffect(() => {
+    if (exportErrorMessage) {
+      showErrorToast(exportErrorMessage);
+    }
+  }, [exportErrorMessage]);
 
   const saveProcessConfig = async (nextConfig) => {
     try {
@@ -2730,12 +3492,12 @@ export function App() {
   };
 
   const saveStageNode = async (nextConfig) => {
-    if (!selectedNodeId?.startsWith('stage:')) {
-      return;
+    if (!editorNodeId?.startsWith('stage:')) {
+      return false;
     }
 
-    const stageId = selectedNodeId.split(':')[1];
-    const selectedStage = findSelectedNode(nextConfig, selectedNodeId)?.node;
+    const stageId = editorNodeId.split(':')[1];
+    const selectedStage = findSelectedNode(nextConfig, editorNodeId)?.node;
     if (!selectedStage) {
       return false;
     }
@@ -2746,9 +3508,26 @@ export function App() {
       await updateStageNode({
         variables: {
           id: stageId,
-          input: stripTypename(serializeStage(selectedStage)),
+          input: stripTypename({
+            executor: selectedStage.executor ?? '',
+            nodeName: selectedStage.nodeName ?? '',
+            nodeComment: selectedStage.nodeComment ?? '',
+            log: selectedStage.log
+              ? {
+                  journalServiceName: selectedStage.log.journalServiceName ?? '',
+                }
+              : null,
+          }),
         },
       });
+      if (selectedStage.configurator?.id) {
+        await updateConfiguratorNode({
+          variables: {
+            id: selectedStage.configurator.id,
+            input: stripTypename(serializeStageConfigurator(selectedStage.configurator)),
+          },
+        });
+      }
       refetch();
       return true;
     } catch (mutationError) {
@@ -2759,12 +3538,12 @@ export function App() {
   };
 
   const saveSubprocessNode = async (nextConfig) => {
-    if (!selectedNodeId?.startsWith('subprocess:')) {
-      return;
+    if (!editorNodeId?.startsWith('subprocess:')) {
+      return false;
     }
 
-    const subprocessId = selectedNodeId.split(':')[1];
-    const selectedSubprocess = findSelectedNode(nextConfig, selectedNodeId)?.node;
+    const subprocessId = editorNodeId.split(':')[1];
+    const selectedSubprocess = findSelectedNode(nextConfig, editorNodeId)?.node;
     if (!selectedSubprocess) {
       return false;
     }
@@ -2788,11 +3567,11 @@ export function App() {
   };
 
   const saveReverseNode = async (nextConfig) => {
-    if (!selectedNodeId?.startsWith('reverse:')) {
-      return;
+    if (!editorNodeId?.startsWith('reverse:')) {
+      return false;
     }
 
-    const selectedReverse = findSelectedNode(nextConfig, selectedNodeId)?.node;
+    const selectedReverse = findSelectedNode(nextConfig, editorNodeId)?.node;
     if (!selectedReverse?.id) {
       return false;
     }
@@ -2804,8 +3583,6 @@ export function App() {
         variables: {
           id: selectedReverse.id,
           input: stripTypename({
-            nodeName: selectedReverse.nodeName ?? '',
-            nodeComment: selectedReverse.nodeComment ?? '',
             status: normalizeReferenceDraft(selectedReverse.status),
             output: (selectedReverse.output ?? []).map(serializeReverseOutput),
           }),
@@ -2821,11 +3598,11 @@ export function App() {
   };
 
   const saveReverseOutputNode = async (nextConfig) => {
-    if (!selectedNodeId?.startsWith('reverseOutput:')) {
-      return;
+    if (!editorNodeId?.startsWith('reverseOutput:')) {
+      return false;
     }
 
-    const selectedOutput = findSelectedNode(nextConfig, selectedNodeId)?.node;
+    const selectedOutput = findSelectedNode(nextConfig, editorNodeId)?.node;
     if (!selectedOutput?.id) {
       return false;
     }
@@ -2849,11 +3626,11 @@ export function App() {
   };
 
   const saveResultNode = async (nextConfig) => {
-    if (!selectedNodeId?.startsWith('result:')) {
-      return;
+    if (!editorNodeId?.startsWith('result:')) {
+      return false;
     }
 
-    const selectedResult = findSelectedNode(nextConfig, selectedNodeId)?.node;
+    const selectedResult = findSelectedNode(nextConfig, editorNodeId)?.node;
     if (!selectedResult?.id) {
       return false;
     }
@@ -2865,13 +3642,9 @@ export function App() {
         variables: {
           id: selectedResult.id,
           input: stripTypename({
-            nodeName: selectedResult.nodeName ?? '',
-            nodeComment: selectedResult.nodeComment ?? '',
-            inputScenarios: selectedResult.inputScenarios ?? [],
+            inputScenarios: sanitizeInputScenarios(selectedResult.inputScenarios),
             reverse: (selectedResult.reverse ?? []).map((reverse) => ({
               id: reverse.id ?? undefined,
-              nodeName: reverse.nodeName ?? '',
-              nodeComment: reverse.nodeComment ?? '',
               status: normalizeReferenceDraft(reverse.status),
               output: (reverse.output ?? []).map(serializeReverseOutput),
             })),
@@ -2888,12 +3661,12 @@ export function App() {
   };
 
   const saveProcessNode = async (nextConfig) => {
-    if (!selectedNodeId?.startsWith('process:')) {
-      return;
+    if (!editorNodeId?.startsWith('process:')) {
+      return false;
     }
 
-    const processId = selectedNodeId.split(':')[1];
-    const selectedProcess = findSelectedNode(nextConfig, selectedNodeId)?.node;
+    const processId = editorNodeId.split(':')[1];
+    const selectedProcess = findSelectedNode(nextConfig, editorNodeId)?.node;
     if (!selectedProcess) {
       return false;
     }
@@ -2940,6 +3713,8 @@ export function App() {
       setSelectedConfigId(created.id);
       if (created.process?.id) {
         setSelectedNodeId(`process:${created.process.id}`);
+        setEditorNodeId(`process:${created.process.id}`);
+        setIsEditorOpen(true);
         setExpandedNodeIds(getDefaultExpandedNodeIds(created));
       }
     } catch (mutationError) {
@@ -2948,23 +3723,23 @@ export function App() {
   };
 
   const handleSaveNode = async (values) => {
-    if (!activeProcessConfig || !selectedNodeId) {
-      return;
+    if (!activeProcessConfig || !editorNodeId) {
+      return false;
     }
 
-    const nextConfig = updateSelectedNode(activeProcessConfig, selectedNodeId, values);
+    const nextConfig = updateSelectedNode(activeProcessConfig, editorNodeId, values);
     let saved = false;
-    if (selectedNodeId.startsWith('process:')) {
+    if (editorNodeId.startsWith('process:')) {
       saved = await saveProcessNode(nextConfig);
-    } else if (selectedNodeId.startsWith('subprocess:')) {
+    } else if (editorNodeId.startsWith('subprocess:')) {
       saved = await saveSubprocessNode(nextConfig);
-    } else if (selectedNodeId.startsWith('result:')) {
+    } else if (editorNodeId.startsWith('result:')) {
       saved = await saveResultNode(nextConfig);
-    } else if (selectedNodeId.startsWith('reverseOutput:')) {
+    } else if (editorNodeId.startsWith('reverseOutput:')) {
       saved = await saveReverseOutputNode(nextConfig);
-    } else if (selectedNodeId.startsWith('reverse:')) {
+    } else if (editorNodeId.startsWith('reverse:')) {
       saved = await saveReverseNode(nextConfig);
-    } else if (selectedNodeId.startsWith('stage:')) {
+    } else if (editorNodeId.startsWith('stage:')) {
       saved = await saveStageNode(nextConfig);
     } else {
       saved = await saveProcessConfig(nextConfig);
@@ -2973,54 +3748,50 @@ export function App() {
     if (saved) {
       showSaveSuccessToast();
     }
+
+    return saved;
   };
 
   const handleAddSubprocess = async () => {
-    if (!activeProcessConfig?.process) {
+    const processId = workingProcessConfig?.process?.id;
+    if (!processId) {
       return;
     }
 
-    const nextConfig = {
-      ...activeProcessConfig,
-      process: {
-        ...activeProcessConfig.process,
-        subprocess: [
-          ...(activeProcessConfig.process.subprocess ?? []),
-          createDefaultSubprocess((activeProcessConfig.process.subprocess ?? []).length + 1),
-        ],
+    await createSubprocessNode({
+      variables: {
+        processId,
+        input: stripTypename(
+          serializeSubprocess(createDefaultSubprocess((workingProcessConfig.process.subprocess ?? []).length + 1)),
+        ),
       },
-    };
-
-    await saveProcessConfig(nextConfig);
+    });
+    await refetch();
     setExpandedNodeIds((current) => {
-      const processNodeId = activeProcessConfig.process?.id ? `process:${activeProcessConfig.process.id}` : null;
+      const processNodeId = workingProcessConfig.process?.id ? `process:${workingProcessConfig.process.id}` : null;
       return processNodeId && !current.includes(processNodeId) ? [...current, processNodeId] : current;
     });
   };
 
   const handleAddStage = async () => {
-    if (!activeProcessConfig?.process || !selectedNodeId?.startsWith('subprocess:')) {
+    if (!workingProcessConfig?.process || !editorNodeId?.startsWith('subprocess:')) {
       return;
     }
 
-    const targetId = selectedNodeId.split(':')[1];
-    const nextConfig = {
-      ...activeProcessConfig,
-      process: {
-        ...activeProcessConfig.process,
-        subprocess: (activeProcessConfig.process.subprocess ?? []).map((subprocess) =>
-          String(subprocess.id) === targetId
-            ? {
-                ...subprocess,
-                stages: [...(subprocess.stages ?? []), createDefaultStage((subprocess.stages ?? []).length + 1)],
-              }
-            : subprocess,
-        ),
-      },
-    };
+    const subprocessId = editorNodeId.split(':')[1];
+    const subprocess = findSelectedNode(workingProcessConfig, editorNodeId)?.node;
+    if (!subprocessId || !subprocess) {
+      return;
+    }
 
-    await saveProcessConfig(nextConfig);
-    setExpandedNodeIds((current) => (current.includes(selectedNodeId) ? current : [...current, selectedNodeId]));
+    await createStageNode({
+      variables: {
+        subprocessId,
+        input: stripTypename(serializeStage(createDefaultStage((subprocess.stages ?? []).length + 1))),
+      },
+    });
+    await refetch();
+    setExpandedNodeIds((current) => (current.includes(editorNodeId) ? current : [...current, editorNodeId]));
   };
 
   const handleToggleNode = (nodeId) => {
@@ -3031,12 +3802,26 @@ export function App() {
 
   const handleEditNode = (nodeId) => {
     setSelectedNodeId(nodeId);
+    setEditorNodeId(nodeId);
+    setViewerNodeId(null);
+    setStageOrderNodeId(null);
     setIsEditorOpen(true);
+  };
+
+  const handleViewNode = (nodeId) => {
+    setSelectedNodeId(nodeId);
+    setViewerNodeId(nodeId);
+    setEditorNodeId(null);
+    setStageOrderNodeId(null);
+    setIsEditorOpen(false);
   };
 
   const handleReorderSubprocessNode = (nodeId) => {
     setSelectedNodeId(nodeId);
-    setIsEditorOpen(true);
+    setViewerNodeId(null);
+    setEditorNodeId(null);
+    setStageOrderNodeId(nodeId);
+    setIsEditorOpen(false);
   };
 
   const handleAddChildNode = async (nodeId) => {
@@ -3044,8 +3829,22 @@ export function App() {
     try {
       setUpdateErrorMessage('');
 
-      if (kind === 'stage') {
-        const selectedStage = findSelectedNode(activeProcessConfig, nodeId);
+      if (kind === 'subprocess') {
+        const subprocess = findSelectedNode(workingProcessConfig, nodeId)?.node;
+        if (!subprocess?.id) {
+          setUpdateErrorMessage('Не удалось определить subprocess для создания stage.');
+          return;
+        }
+
+        await createStageNode({
+          variables: {
+            subprocessId: subprocess.id,
+            input: stripTypename(serializeStage(createDefaultStage((subprocess.stages ?? []).length + 1))),
+          },
+        });
+        await refetch();
+      } else if (kind === 'stage') {
+        const selectedStage = findSelectedNode(workingProcessConfig, nodeId);
         const configuratorId = selectedStage?.node?.configurator?.id;
         if (!configuratorId) {
           setUpdateErrorMessage('Не удалось определить configurator stage для создания result.');
@@ -3056,15 +3855,13 @@ export function App() {
           variables: {
             configuratorId,
             input: stripTypename({
-              nodeName: `result_${(selectedStage?.node?.configurator?.result ?? []).length + 1}`,
-              nodeComment: 'добавьте комментарий',
               inputScenarios: [],
               reverse: [],
             }),
           },
         });
       } else if (kind === 'result') {
-        const selectedResult = findSelectedNode(activeProcessConfig, nodeId);
+        const selectedResult = findSelectedNode(workingProcessConfig, nodeId);
         const resultId = selectedResult?.node?.id;
         if (!resultId) {
           setUpdateErrorMessage('Не удалось определить result для создания reverse.');
@@ -3075,15 +3872,13 @@ export function App() {
           variables: {
             resultId,
             input: stripTypename({
-              nodeName: `reverse_${(selectedResult?.node?.reverse ?? []).length + 1}`,
-              nodeComment: 'добавьте комментарий',
               status: { code: 'INITIATED' },
               output: [],
             }),
           },
         });
       } else if (kind === 'reverse') {
-        const selectedReverse = findSelectedNode(activeProcessConfig, nodeId);
+        const selectedReverse = findSelectedNode(workingProcessConfig, nodeId);
         const reverseId = selectedReverse?.node?.id;
         if (!reverseId) {
           setUpdateErrorMessage('Не удалось определить reverse для создания reverse output.');
@@ -3094,8 +3889,6 @@ export function App() {
           variables: {
             reverseId,
             input: stripTypename({
-              nodeName: `reverseOutput_${(selectedReverse?.node?.output ?? []).length + 1}`,
-              nodeComment: 'добавьте комментарий',
               phase: { code: 'START' },
               name: '',
               rule: '',
@@ -3114,7 +3907,9 @@ export function App() {
       setUpdateErrorMessage(
         getErrorMessage(
           mutationError,
-          kind === 'stage'
+          kind === 'subprocess'
+            ? 'Не удалось создать stage.'
+            : kind === 'stage'
             ? 'Не удалось создать result.'
             : kind === 'result'
               ? 'Не удалось создать reverse.'
@@ -3130,7 +3925,7 @@ export function App() {
       return;
     }
 
-    const selectedStage = findSelectedNode(activeProcessConfig, nodeId);
+    const selectedStage = findSelectedNode(workingProcessConfig, nodeId);
     const configuratorId = selectedStage?.node?.configurator?.id;
     if (!configuratorId) {
       setUpdateErrorMessage('Не удалось определить configurator stage для массового создания results.');
@@ -3145,8 +3940,6 @@ export function App() {
             variables: {
               configuratorId,
               input: stripTypename({
-                nodeName: `result_${(selectedStage?.node?.configurator?.result ?? []).length + index + 1}`,
-                nodeComment: 'добавьте комментарий',
                 inputScenarios,
                 reverse: [],
               }),
@@ -3177,20 +3970,20 @@ export function App() {
       } else if (kind === 'configurator') {
         await deleteConfiguratorNode({ variables: { id: rawId } });
       } else if (kind === 'result') {
-        const selectedResult = findSelectedNode(activeProcessConfig, nodeId);
+        const selectedResult = findSelectedNode(workingProcessConfig, nodeId);
         const resultId = selectedResult?.node?.id ?? extraId;
         if (!resultId) {
           throw new Error('Result id not found');
         }
         await deleteResultNode({ variables: { id: resultId } });
       } else if (kind === 'reverse') {
-        const reverseId = findSelectedNode(activeProcessConfig, nodeId)?.node?.id;
+        const reverseId = findSelectedNode(workingProcessConfig, nodeId)?.node?.id;
         if (!reverseId) {
           throw new Error('Reverse id not found');
         }
         await deleteReverseNode({ variables: { id: reverseId } });
       } else if (kind === 'reverseOutput') {
-        const reverseOutputId = findSelectedNode(activeProcessConfig, nodeId)?.node?.id;
+        const reverseOutputId = findSelectedNode(workingProcessConfig, nodeId)?.node?.id;
         if (!reverseOutputId) {
           throw new Error('ReverseOutput id not found');
         }
@@ -3199,8 +3992,17 @@ export function App() {
         return;
       }
 
+      if (editorNodeId === nodeId) {
+        setEditorNodeId(null);
+        setIsEditorOpen(false);
+      }
+      if (viewerNodeId === nodeId) {
+        setViewerNodeId(null);
+      }
+      if (stageOrderNodeId === nodeId) {
+        setStageOrderNodeId(null);
+      }
       setSelectedNodeId(null);
-      setIsEditorOpen(false);
       await refetch();
     } catch (mutationError) {
       setUpdateErrorMessage(getErrorMessage(mutationError, 'Не удалось удалить узел.'));
@@ -3209,7 +4011,17 @@ export function App() {
 
   const handleCloseEditor = () => {
     setIsEditorOpen(false);
-    setSelectedNodeId(null);
+    setEditorNodeId(null);
+    setEditorPreview(null);
+    setAutosaveStatus(null);
+  };
+
+  const handleCloseViewer = () => {
+    setViewerNodeId(null);
+  };
+
+  const handleCloseStageOrderPanel = () => {
+    setStageOrderNodeId(null);
   };
 
   const handleToggleTopologyFullscreen = async () => {
@@ -3229,7 +4041,40 @@ export function App() {
   const handleSelectProcessConfig = (configId) => {
     setSelectedConfigId(configId || null);
     setLocalProcessConfig(null);
+    setEditorNodeId(null);
+    setViewerNodeId(null);
+    setStageOrderNodeId(null);
+    setEditorPreview(null);
+    setIsEditorOpen(false);
+    setAutosaveStatus(null);
     setUpdateErrorMessage('');
+    setExportErrorMessage('');
+  };
+
+  const handleExportProcessConfig = async () => {
+    if (!activeProcessConfig?.id || isExportingProcessConfig) {
+      return;
+    }
+
+    try {
+      setExportErrorMessage('');
+      setIsExportingProcessConfig(true);
+
+      const response = await fetch(`/api/process-configs/${activeProcessConfig.id}/export`);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const filename =
+        getFilenameFromContentDisposition(response.headers.get('content-disposition')) ||
+        `${activeProcessConfig.process?.contextCode?.code || 'process'}.yaml`;
+      const blob = await response.blob();
+      downloadBlob(blob, filename);
+    } catch (requestError) {
+      setExportErrorMessage(getErrorMessage(requestError, 'Не удалось скачать YAML-конфигурацию процесса.'));
+    } finally {
+      setIsExportingProcessConfig(false);
+    }
   };
 
   const handleReorderStages = async (subprocessId, nextStageOrder) => {
@@ -3258,7 +4103,20 @@ export function App() {
       },
     };
 
-    await saveProcessConfig(nextConfig);
+    try {
+      setUpdateErrorMessage('');
+      setLocalProcessConfig(nextConfig);
+      await reorderSubprocessStages({
+        variables: {
+          subprocessId,
+          stageIds: nextStageOrder,
+        },
+      });
+      await refetch();
+    } catch (mutationError) {
+      setLocalProcessConfig(serverActiveProcessConfig);
+      setUpdateErrorMessage(getErrorMessage(mutationError, 'Не удалось изменить порядок stage.'));
+    }
   };
 
   return (
@@ -3309,27 +4167,28 @@ export function App() {
 
           {!isInitialLoading && !error && activeProcessConfig && (
             <ProcessTopology
-              processConfig={activeProcessConfig}
+              processConfig={workingProcessConfig}
               processConfigOptions={processConfigOptions}
               selectedProcessConfigId={activeProcessConfig?.id ?? ''}
               selectedNodeId={selectedNodeId}
               expandedNodeIds={expandedNodeIds}
               onToggleNode={handleToggleNode}
               onEditNode={handleEditNode}
+              onViewNode={handleViewNode}
               onReorderSubprocessNode={handleReorderSubprocessNode}
               onDeleteNode={handleDeleteNode}
               onAddChildNode={handleAddChildNode}
               onAddSubprocess={handleAddSubprocess}
               onCreateProcess={handleCreateProcess}
+              onExportProcessConfig={handleExportProcessConfig}
               onSelectProcessConfig={handleSelectProcessConfig}
               onToggleFullscreen={handleToggleTopologyFullscreen}
               isFullscreen={isTopologyFullscreen}
               isCreateDisabled={processCodeOptions.length === 0}
               isCreating={createState.loading}
+              isExporting={isExportingProcessConfig}
             />
           )}
-
-          {createErrorMessage && <Alert variant="danger" title={createErrorMessage} className="topology-stage__alert" />}
 
           <div
             className={isEditorOpen ? 'editor-drawer-backdrop editor-drawer-backdrop-open' : 'editor-drawer-backdrop'}
@@ -3342,7 +4201,16 @@ export function App() {
             onClick={(event) => event.stopPropagation()}
           >
             <div className="editor-drawer__header">
-              <Title headingLevel="h3">Свойства узла</Title>
+              <div className="editor-drawer__header-main">
+                <Title headingLevel="h3">Свойства узла</Title>
+                <div className="editor-drawer__status">
+                  {editorIsSaving
+                    ? 'Сохранение...'
+                    : autosaveStatus?.secondsLeft
+                      ? formatAutosaveCountdownLabel(autosaveStatus.secondsLeft)
+                      : 'Изменения сохраняются автоматически'}
+                </div>
+              </div>
               <Button variant="plain" onClick={handleCloseEditor} aria-label="Закрыть панель свойств">
                 <XClose aria-hidden className="editor-drawer__close-icon" size={16} />
               </Button>
@@ -3350,40 +4218,73 @@ export function App() {
             <div className="editor-drawer__body">
               <NodeEditor
                 processConfig={activeProcessConfig}
-                selectedNodeId={selectedNodeId}
+                selectedNodeId={editorNodeId}
                 onSave={handleSaveNode}
+                onDraftChange={(values) => setEditorPreview(values ? { nodeId: editorNodeId, values } : null)}
+                onAutosaveStatusChange={setAutosaveStatus}
                 onAddSubprocess={handleAddSubprocess}
-                onAddStage={handleAddStage}
-                onReorderStages={handleReorderStages}
                 onBulkCreateResults={handleBulkCreateResults}
                 contextCodeOptions={processCodeOptions}
                 phaseOptions={phaseOptions}
+                b3StatusOptions={b3StatusOptions}
+                slaDurationUnitOptions={slaDurationUnitOptions}
                 slaStatusOptions={slaStatusOptions}
-                isSaving={
-                  updateState.loading ||
-                  updateStageState.loading ||
-                  updateSubprocessState.loading ||
-                  updateProcessNodeState.loading ||
-                  createResultState.loading ||
-                  createReverseState.loading ||
-                  updateReverseState.loading ||
-                  updateResultState.loading ||
-                  createReverseOutputState.loading ||
-                  updateReverseOutputState.loading ||
-                  deleteSubprocessState.loading ||
-                  deleteStageState.loading ||
-                  deleteConfiguratorState.loading ||
-                  deleteResultState.loading ||
-                  deleteReverseState.loading ||
-                  deleteReverseOutputState.loading
-                }
+                isSaving={editorIsSaving}
               />
-              {updateErrorMessage && (
-                <Alert isInline variant="danger" title={updateErrorMessage} className="form-alert" />
-              )}
             </div>
           </aside>
-          {toast && <Toast title={toast.title} message={toast.message} onClose={() => setToast(null)} />}
+          <div
+            className={viewerNodeId ? 'editor-drawer-backdrop editor-drawer-backdrop-open' : 'editor-drawer-backdrop'}
+            onClick={handleCloseViewer}
+            aria-hidden={!viewerNodeId}
+          />
+          <aside
+            className={viewerNodeId ? 'editor-drawer editor-drawer-open' : 'editor-drawer'}
+            aria-hidden={!viewerNodeId}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="editor-drawer__header">
+              <div className="editor-drawer__header-main">
+                <Title headingLevel="h3">Просмотр узла</Title>
+                <div className="editor-drawer__status">Режим просмотра. Изменение данных недоступно.</div>
+              </div>
+              <Button variant="plain" onClick={handleCloseViewer} aria-label="Закрыть панель просмотра">
+                <XClose aria-hidden className="editor-drawer__close-icon" size={16} />
+              </Button>
+            </div>
+            <div className="editor-drawer__body">
+              <NodeViewer processConfig={activeProcessConfig} selectedNodeId={viewerNodeId} />
+            </div>
+          </aside>
+          <div
+            className={stageOrderNodeId ? 'editor-drawer-backdrop editor-drawer-backdrop-open' : 'editor-drawer-backdrop'}
+            onClick={handleCloseStageOrderPanel}
+            aria-hidden={!stageOrderNodeId}
+          />
+          <aside
+            className={stageOrderNodeId ? 'editor-drawer editor-drawer-open' : 'editor-drawer'}
+            aria-hidden={!stageOrderNodeId}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="editor-drawer__header">
+              <div className="editor-drawer__header-main">
+                <Title headingLevel="h3">Порядок исполнения стадий</Title>
+                <div className="editor-drawer__status">Перетащите stage. После отпускания порядок сохранится сразу.</div>
+              </div>
+              <Button variant="plain" onClick={handleCloseStageOrderPanel} aria-label="Закрыть панель порядка стадий">
+                <XClose aria-hidden className="editor-drawer__close-icon" size={16} />
+              </Button>
+            </div>
+            <div className="editor-drawer__body">
+              <StageOrderEditor
+                processConfig={activeProcessConfig}
+                subprocessNodeId={stageOrderNodeId}
+                onReorderStages={handleReorderStages}
+                isSaving={editorIsSaving}
+              />
+            </div>
+          </aside>
+          {toast && <Toast title={toast.title} message={toast.message} variant={toast.variant} onClose={() => setToast(null)} />}
         </div>
       </div>
     </Page>

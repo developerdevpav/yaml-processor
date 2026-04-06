@@ -98,9 +98,6 @@ databaseChangeLog:
                   name: subprocess_sort
                   type: INT
               - column:
-                  name: context_code
-                  type: VARCHAR(64)
-              - column:
                   name: node_name
                   type: VARCHAR(255)
               - column:
@@ -218,14 +215,6 @@ databaseChangeLog:
                   name: stage_log_journal_service_name
                   type: VARCHAR(500)
               - column:
-                  name: context_code
-                  type: VARCHAR(64)
-              - column:
-                  name: description
-                  type: VARCHAR(4000)
-                  constraints:
-                    nullable: false
-              - column:
                   name: node_name
                   type: VARCHAR(255)
               - column:
@@ -271,12 +260,6 @@ databaseChangeLog:
               - column:
                   name: result_sort
                   type: INT
-              - column:
-                  name: node_name
-                  type: VARCHAR(255)
-              - column:
-                  name: node_comment
-                  type: VARCHAR(4000)
         - addForeignKeyConstraint:
             baseTableName: result
             baseColumnNames: configurator_id
@@ -345,12 +328,6 @@ databaseChangeLog:
                   type: VARCHAR(64)
                   constraints:
                     nullable: false
-              - column:
-                  name: node_name
-                  type: VARCHAR(255)
-              - column:
-                  name: node_comment
-                  type: VARCHAR(4000)
         - addForeignKeyConstraint:
             baseTableName: reverse_entry
             baseColumnNames: result_id
@@ -395,12 +372,6 @@ databaseChangeLog:
                   type: VARCHAR(2000)
               - column:
                   name: rule
-                  type: VARCHAR(4000)
-              - column:
-                  name: node_name
-                  type: VARCHAR(255)
-              - column:
-                  name: node_comment
                   type: VARCHAR(4000)
               - column:
                   name: body_event_object_type
