@@ -63,6 +63,12 @@ mvn -pl modules/configurator clean package
 mvn -pl modules/configurator -Pwith-frontend clean package
 ```
 
+Собрать frontend и скопировать его в `modules/configurator/src/main/resources/static`:
+
+```bash
+mvn -pl modules/configurator -Pfrontend-to-resources process-resources
+```
+
 Результат сборки backend:
 
 ```text
@@ -112,7 +118,7 @@ Vite будет проксировать запросы к backend на `http://
 
 ## Полезные замечания
 
-- Если не нужно собирать frontend при Maven-запуске, можно использовать:
-
+- Профиль `with-frontend` собирает frontend и встраивает его в backend build output.
+- Профиль `frontend-to-resources` копирует frontend прямо в `src/main/resources/static`. Это удобно для ручной фиксации собранного UI в репозитории.
 - Если на машине нет `npm`, собирайте jar с профилем `with-frontend` один раз на машине, где `npm` есть, и переносите на сервер уже готовый jar.
 - Для полноценной работы приложения backend должен быть запущен, даже если frontend стартует отдельно через Vite.

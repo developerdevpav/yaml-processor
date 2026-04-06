@@ -23,6 +23,7 @@
         <kotlin.version>2.0.21</kotlin.version>
         <frontend.dir>${project.basedir}/../frontend</frontend.dir>
         <frontend.build.dir>${frontend.dir}/dist</frontend.build.dir>
+        <frontend.resources.dir>${project.basedir}/src/main/resources/static</frontend.resources.dir>
         <skip.frontend>true</skip.frontend>
     </properties>
 
@@ -236,6 +237,94 @@
             <properties>
                 <skip.frontend>false</skip.frontend>
             </properties>
+        </profile>
+        <profile>
+            <id>frontend-to-resources</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <version>3.5.0</version>
+                        <executions>
+                            <execution>
+                                <id>frontend-npm-ci-to-resources</id>
+                                <phase>generate-resources</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <workingDirectory>${frontend.dir}</workingDirectory>
+                                    <executable>npm</executable>
+                                    <arguments>
+                                        <argument>ci</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>frontend-build-to-resources</id>
+                                <phase>generate-resources</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <workingDirectory>${frontend.dir}</workingDirectory>
+                                    <executable>npm</executable>
+                                    <arguments>
+                                        <argument>run</argument>
+                                        <argument>build</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-antrun-plugin</artifactId>
+                        <version>3.1.0</version>
+                        <executions>
+                            <execution>
+                                <id>clean-frontend-resources</id>
+                                <phase>process-resources</phase>
+                                <goals>
+                                    <goal>run</goal>
+                                </goals>
+                                <configuration>
+                                    <target>
+                                        <delete includeemptydirs="true">
+                                            <fileset dir="${frontend.resources.dir}/assets" erroronmissingdir="false"/>
+                                        </delete>
+                                        <delete file="${frontend.resources.dir}/index.html" quiet="true"/>
+                                    </target>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-resources-plugin</artifactId>
+                        <version>3.3.1</version>
+                        <executions>
+                            <execution>
+                                <id>copy-frontend-dist-to-resources</id>
+                                <phase>process-resources</phase>
+                                <goals>
+                                    <goal>copy-resources</goal>
+                                </goals>
+                                <configuration>
+                                    <outputDirectory>${frontend.resources.dir}</outputDirectory>
+                                    <resources>
+                                        <resource>
+                                            <directory>${frontend.build.dir}</directory>
+                                            <filtering>false</filtering>
+                                        </resource>
+                                    </resources>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
         </profile>
     </profiles>
 </project>
