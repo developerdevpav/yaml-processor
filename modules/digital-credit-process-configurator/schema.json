@@ -260,7 +260,8 @@
                 "START",
                 "BUSINESS_COMPLETE",
                 "ACTIVITY_COMPLETE",
-                "COMPLETE_FAILURE"
+                "COMPLETE_FAILURE",
+                "INITIATED"
             ]
         },
         "SlaStatus": {

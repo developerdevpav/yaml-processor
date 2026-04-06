@@ -5,14 +5,12 @@ import com.fasterxml.jackson.annotation.JsonValue
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.Id
-import jakarta.persistence.Inheritance
-import jakarta.persistence.InheritanceType
+import jakarta.persistence.MappedSuperclass
 import jakarta.persistence.Table
 import org.hibernate.annotations.Immutable
 
-@Entity
+@MappedSuperclass
 @Immutable
-@Inheritance(strategy = InheritanceType.TABLE_PER_CLASS)
 abstract class DictionaryEntity(
     @Id
     @Column(name = "code", length = 64, nullable = false) var code: String = ""
