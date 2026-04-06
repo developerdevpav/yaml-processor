@@ -10,7 +10,7 @@
 
 - `modules/frontend`
 
-Frontend собирается Maven-ом автоматически и раздается через backend.
+Frontend можно собрать отдельным Maven-профилем и раздавать через backend.
 
 ## Требования
 
@@ -23,7 +23,7 @@ Frontend собирается Maven-ом автоматически и разд�
 Из корня проекта:
 
 ```bash
-mvn -pl modules/configurator spring-boot:run
+mvn -pl modules/configurator -Pwith-frontend spring-boot:run
 ```
 
 После запуска приложение доступно по адресу:
@@ -34,11 +34,12 @@ http://localhost:8080/
 
 ## Что происходит при запуске
 
-Команда `mvn spring-boot:run` для модуля `configurator` автоматически:
+Команда `mvn -Pwith-frontend spring-boot:run` для модуля `configurator`:
 
-- устанавливает frontend-зависимости через `npm ci`
-- собирает frontend через `npm run build`
-- копирует собранные файлы в статические ресурсы backend
+- включает Maven-профиль `with-frontend`
+- выполняет `npm ci` в `modules/frontend`
+- выполняет `npm run build`
+- копирует собранный frontend в статические ресурсы backend
 - запускает Spring Boot приложение
 
 ## Основные URL
@@ -56,13 +57,19 @@ http://localhost:8080/
 mvn -pl modules/configurator clean package
 ```
 
+Собрать backend вместе с frontend:
+
+```bash
+mvn -pl modules/configurator -Pwith-frontend clean package
+```
+
 Результат сборки backend:
 
 ```text
 modules/configurator/target/
 ```
 
-Во время `package` frontend также собирается автоматически.
+Без профиля `with-frontend` собирается только backend.
 
 ## Запуск собранного jar
 
@@ -71,6 +78,8 @@ modules/configurator/target/
 ```bash
 java -jar modules/configurator/target/configurator-1.0.0.jar
 ```
+
+Если jar собран с профилем `with-frontend`, UI будет доступен через backend на `http://localhost:8080/`.
 
 ## Использование
 
@@ -105,8 +114,5 @@ Vite будет проксировать запросы к backend на `http://
 
 - Если не нужно собирать frontend при Maven-запуске, можно использовать:
 
-```bash
-mvn -pl modules/configurator -Dskip.frontend=true spring-boot:run
-```
-
+- Если на машине нет `npm`, собирайте jar с профилем `with-frontend` один раз на машине, где `npm` есть, и переносите на сервер уже готовый jar.
 - Для полноценной работы приложения backend должен быть запущен, даже если frontend стартует отдельно через Vite.

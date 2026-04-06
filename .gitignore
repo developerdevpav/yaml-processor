@@ -65,5 +65,4 @@ data/
 
 # Frontend
 modules/frontend/node_modules/
-modules/frontend/dist/
 modules/frontend/.vite/
