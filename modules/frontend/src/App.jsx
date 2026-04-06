@@ -48,6 +48,22 @@ function formatAutosaveCountdownLabel(secondsLeft) {
   return `Автосохранение через ${Math.max(1, Math.ceil(secondsLeft))} c`;
 }
 
+function isEmptyJsonValue(value) {
+  if (value == null) {
+    return true;
+  }
+
+  if (Array.isArray(value)) {
+    return value.length === 0;
+  }
+
+  if (typeof value === 'object') {
+    return Object.keys(value).length === 0;
+  }
+
+  return false;
+}
+
 function Page({ children }) {
   return <div className="min-h-screen bg-[#f8fafc] text-slate-900">{children}</div>;
 }
@@ -300,6 +316,7 @@ const PROCESS_FIELDS = gql`
       }
       service {
         scenario
+        type
         status
         sla {
           durationValue
@@ -832,6 +849,7 @@ function serializeConfigurator(configurator) {
                 service: output.body.service
                   ? {
                       scenario: output.body.service.scenario ?? '',
+                      type: output.body.service.type ?? '',
                       status: output.body.service.status ?? '',
                       sla: serializeSlaState(output.body.service.sla),
                     }
@@ -905,6 +923,7 @@ function serializeReverseOutput(output) {
           service: output.body.service
             ? {
                 scenario: output.body.service.scenario ?? '',
+                type: output.body.service.type ?? '',
                 status: output.body.service.status ?? '',
                 sla: serializeSlaState(output.body.service.sla),
               }
@@ -1087,7 +1106,9 @@ function formatReverseOutputEventType(phaseCode) {
 }
 
 function getReverseOutputLayout(stage, resultIndex, reverseIndex, output, outputIndex) {
-  const serviceSummary = [output.body?.service?.scenario, output.body?.service?.status].filter(Boolean).join(' / ');
+  const serviceSummary = [output.body?.service?.scenario, output.body?.service?.type, output.body?.service?.status]
+    .filter(Boolean)
+    .join(' / ');
   const bodySummary = [output.body?.type, output.body?.eventObject?.type].filter(Boolean).join(' / ');
   const hasLogConfiguration = Boolean(output.log?.journalServiceName || output.log?.message);
   const hasSlaConfiguration = Boolean(
@@ -1645,9 +1666,10 @@ function getNodeSavePayload(kind, draft, subprocessTriggerText = '', filterEvent
 
   if (kind === 'reverseOutput') {
     const rawRule = reverseOutputRuleText.trim();
+    const parsedRule = rawRule ? JSON.parse(rawRule) : {};
     return {
       ...serializeReverseOutput(draft),
-      rule: JSON.stringify(rawRule ? JSON.parse(rawRule) : {}, null, 2),
+      rule: isEmptyJsonValue(parsedRule) ? null : JSON.stringify(parsedRule, null, 2),
     };
   }
 
@@ -2381,6 +2403,7 @@ function NodeEditor({
       },
       service: {
         scenario: '',
+        type: '',
         status: '',
         sla: {
           durationValue: '',
@@ -2851,6 +2874,24 @@ function NodeEditor({
                     }
                   />
                 </FormGroup>
+                <FormGroup label="B3Event.body.service.type" fieldId="reverse-output-service-type">
+                  <TextInput
+                    id="reverse-output-service-type"
+                    value={draft.body?.service?.type ?? ''}
+                    onChange={(_, value) =>
+                      updateReverseOutputDraft((current) => ({
+                        ...current,
+                        body: {
+                          ...(current.body ?? {}),
+                          service: {
+                            ...(current.body?.service ?? {}),
+                            type: value,
+                          },
+                        },
+                      }))
+                    }
+                  />
+                </FormGroup>
                 <FormGroup label="B3Event.body.service.status" fieldId="reverse-output-service-status">
                   <TextInput
                     id="reverse-output-service-status"
@@ -3205,6 +3246,7 @@ function NodeViewer({ processConfig, selectedNodeId }) {
             <div className="viewer-section">
               <Title headingLevel="h5">B3Event Service</Title>
               <StaticField label="B3Event.body.service.scenario" value={node.body?.service?.scenario || '—'} />
+              <StaticField label="B3Event.body.service.type" value={node.body?.service?.type || '—'} />
               <StaticField label="B3Event.body.service.status" value={node.body?.service?.status || '—'} />
             </div>
             <div className="viewer-section">

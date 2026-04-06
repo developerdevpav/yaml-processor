@@ -348,6 +348,9 @@
                 "scenario": {
                     "type": "string"
                 },
+                "type": {
+                    "type": "string"
+                },
                 "status": {
                     "type": "string"
                 },

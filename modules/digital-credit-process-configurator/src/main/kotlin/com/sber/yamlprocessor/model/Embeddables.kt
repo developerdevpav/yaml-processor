@@ -79,6 +79,9 @@ class Service(
     @Column(name = "scenario")
     var scenario: String = "",
 
+    @Column(name = "type")
+    var type: String? = null,
+
     @Column(name = "status")
     var status: String? = null,
 
@@ -99,6 +102,7 @@ class Body(
     @Embedded
     @AttributeOverrides(
         AttributeOverride(name = "scenario", column = Column(name = "body_service_scenario")),
+        AttributeOverride(name = "type", column = Column(name = "body_service_type")),
         AttributeOverride(name = "status", column = Column(name = "body_service_status")),
         AttributeOverride(name = "sla.durationValue", column = Column(name = "body_service_sla_duration_value")),
     )

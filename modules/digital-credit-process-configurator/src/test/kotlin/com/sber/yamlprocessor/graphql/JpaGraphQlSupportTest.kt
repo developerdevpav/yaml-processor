@@ -77,7 +77,10 @@ class JpaGraphQlSupportTest {
                 "body" to mapOf(
                     "type" to "body-type",
                     "eventObject" to mapOf("type" to "event-type"),
-                    "service" to mapOf("scenario" to "service-scenario")
+                    "service" to mapOf(
+                        "scenario" to "service-scenario",
+                        "type" to "service-type"
+                    )
                 ),
                 "log" to mapOf(
                     "journalServiceName" to "journal-name",
@@ -90,6 +93,7 @@ class JpaGraphQlSupportTest {
         assertEquals("body-type", output.body.type)
         assertEquals("event-type", output.body.eventObject?.type)
         assertEquals("service-scenario", output.body.service?.scenario)
+        assertEquals("service-type", output.body.service?.type)
         assertEquals("journal-name", output.log.journalServiceName)
         assertEquals("log-message", output.log.message)
     }
