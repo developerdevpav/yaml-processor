@@ -3,9 +3,11 @@ package com.sber.yamlprocessor.graphql
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.sber.yamlprocessor.model.ActionPhasesDictionary
 import com.sber.yamlprocessor.model.B3StatusDictionary
+import com.sber.yamlprocessor.model.ContextCodesDictionary
 import com.sber.yamlprocessor.model.Result
 import com.sber.yamlprocessor.model.Reverse
 import com.sber.yamlprocessor.model.ReverseOutput
+import com.sber.yamlprocessor.model.Stage
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -96,8 +98,10 @@ class JpaGraphQlSupportTest {
     fun `uses declared dictionary types for reference fields`() {
         val reverseStatusField = registry.entity(Reverse::class.java).fields.first { it.name == "status" }
         val reverseOutputPhaseField = registry.entity(ReverseOutput::class.java).fields.first { it.name == "phase" }
+        val stageContextCodeField = registry.entity(Stage::class.java).fields.first { it.name == "contextCode" }
 
         assertEquals(B3StatusDictionary::class.java, reverseStatusField.targetClass)
         assertEquals(ActionPhasesDictionary::class.java, reverseOutputPhaseField.targetClass)
+        assertEquals(ContextCodesDictionary::class.java, stageContextCodeField.targetClass)
     }
 }

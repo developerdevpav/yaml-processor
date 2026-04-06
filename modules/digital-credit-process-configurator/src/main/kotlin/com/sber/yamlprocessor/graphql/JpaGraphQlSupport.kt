@@ -356,6 +356,16 @@ class JpaGraphQlCrudService(
         if (input.containsKey("nodeComment")) {
             current.nodeComment = input["nodeComment"]?.toString()?.ifBlank { null }
         }
+        if (input.containsKey("contextCode")) {
+            @Suppress("UNCHECKED_CAST")
+            val contextInput = input["contextCode"] as Map<String, Any?>?
+            val contextCode = contextInput?.get("code")?.toString()?.trim().orEmpty()
+            current.contextCode = if (contextCode.isBlank()) {
+                null
+            } else {
+                entityManager.getReference(ContextCodesDictionary::class.java, contextCode)
+            }
+        }
         if (input.containsKey("log")) {
             @Suppress("UNCHECKED_CAST")
             val logInput = input["log"] as Map<String, Any?>?

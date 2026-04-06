@@ -212,6 +212,9 @@ databaseChangeLog:
                   constraints:
                     nullable: false
               - column:
+                  name: context_code
+                  type: VARCHAR(64)
+              - column:
                   name: stage_log_journal_service_name
                   type: VARCHAR(500)
               - column:
@@ -232,6 +235,12 @@ databaseChangeLog:
             constraintName: fk_stage_configurator
             referencedTableName: configurator
             referencedColumnNames: id
+        - addForeignKeyConstraint:
+            baseTableName: stage
+            baseColumnNames: context_code
+            constraintName: fk_stage_context_code
+            referencedTableName: dict_context_codes
+            referencedColumnNames: code
 
         - createTable:
             tableName: result

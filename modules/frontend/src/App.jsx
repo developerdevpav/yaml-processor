@@ -357,6 +357,9 @@ const PROCESS_FIELDS = gql`
     nodeName
     nodeComment
     executor
+    contextCode {
+      code
+    }
     log {
       journalServiceName
     }
@@ -657,6 +660,7 @@ const NODE_COMMENT_HELPER_TEXT = 'Описание узла помогает п�
 function createDefaultStage(index) {
   return {
     executor: `executor_${index}`,
+    contextCode: null,
     nodeName: `stage_${index}`,
     nodeComment: 'добавьте комментарий',
     log: {
@@ -872,6 +876,7 @@ function serializeStage(stage) {
   return {
     id: stage.id ?? undefined,
     executor: stage.executor ?? '',
+    contextCode: refInput(stage.contextCode),
     nodeName: stage.nodeName ?? '',
     nodeComment: stage.nodeComment ?? '',
     log: stage.log
@@ -1627,6 +1632,7 @@ function getNodeSavePayload(kind, draft, subprocessTriggerText = '', filterEvent
     const rawFilterEventRule = filterEventRuleText.trim();
     return {
       executor: draft.executor ?? '',
+      contextCode: normalizeReferenceDraft(draft.contextCode),
       nodeName: draft.nodeName ?? '',
       nodeComment: draft.nodeComment ?? '',
       log: draft.log ?? { journalServiceName: '' },
@@ -2481,6 +2487,16 @@ function NodeEditor({
                   onChange={(_, value) => setDraft((current) => ({ ...current, executor: value }))}
                 />
               </FormGroup>
+              <FormGroup label="Context code" fieldId="stage-context-code">
+                <ProcessSelectField
+                  id="stage-context-code"
+                  value={draft.contextCode?.code ?? ''}
+                  onChange={(next) => updateDraftPath(['contextCode', 'code'], next)}
+                  options={contextCodeOptions}
+                  placeholder="Выберите context code"
+                />
+                <Text component="small">Context code стадии необязателен.</Text>
+              </FormGroup>
               <FormGroup label="Название" fieldId="stage-node-name">
                 <TextInput
                   id="stage-node-name"
@@ -3138,6 +3154,7 @@ function NodeViewer({ processConfig, selectedNodeId }) {
         {selected.kind === 'stage' && (
           <>
             <StaticField label="Исполнитель" value={node.executor || '—'} />
+            <StaticField label="Context code" value={node.contextCode?.code || '—'} />
             <StaticField label="Название" value={node.nodeName || '—'} />
             <StaticField label="Описание" value={node.nodeComment || '—'} />
             <StaticJsonField label="Правило JsonLogic" value={node.configurator?.filterEventRule ?? ''} />
