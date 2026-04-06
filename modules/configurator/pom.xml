@@ -23,7 +23,7 @@
         <kotlin.version>2.0.21</kotlin.version>
         <frontend.dir>${project.basedir}/../frontend</frontend.dir>
         <frontend.build.dir>${frontend.dir}/dist</frontend.build.dir>
-        <skip.frontend>false</skip.frontend>
+        <skip.frontend>true</skip.frontend>
     </properties>
 
     <dependencies>
@@ -229,4 +229,13 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <profile>
+            <id>with-frontend</id>
+            <properties>
+                <skip.frontend>false</skip.frontend>
+            </properties>
+        </profile>
+    </profiles>
 </project>
