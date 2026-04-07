@@ -523,7 +523,9 @@ const PROCESS_FIELDS = gql`
       service {
         scenario
         type
-        status
+        status {
+          code
+        }
         sla {
           durationValue
           durationUnit {
@@ -1064,7 +1066,7 @@ function serializeConfigurator(configurator) {
                   ? {
                       scenario: output.body.service.scenario ?? '',
                       type: output.body.service.type ?? '',
-                      status: output.body.service.status ?? '',
+                      status: refInput(output.body.service.status),
                       sla: serializeSlaState(output.body.service.sla),
                     }
                   : null,
@@ -1138,7 +1140,7 @@ function serializeReverseOutput(output) {
             ? {
                 scenario: output.body.service.scenario ?? '',
                 type: output.body.service.type ?? '',
-                status: output.body.service.status ?? '',
+                status: refInput(output.body.service.status),
                 sla: serializeSlaState(output.body.service.sla),
               }
             : null,
@@ -1320,7 +1322,7 @@ function formatReverseOutputEventType(phaseCode) {
 }
 
 function getReverseOutputLayout(stage, resultIndex, reverseIndex, output, outputIndex) {
-  const serviceSummary = [output.body?.service?.scenario, output.body?.service?.type, output.body?.service?.status]
+  const serviceSummary = [output.body?.service?.scenario, output.body?.service?.type, output.body?.service?.status?.code]
     .filter(Boolean)
     .join(' / ');
   const bodySummary = [output.body?.type, output.body?.eventObject?.type].filter(Boolean).join(' / ');
@@ -3088,21 +3090,26 @@ function NodeEditor({
                   />
                 </FormGroup>
                 <FormGroup label="B3Event.body.service.status" fieldId="reverse-output-service-status">
-                  <TextInput
+                  <ProcessSelectField
                     id="reverse-output-service-status"
-                    value={draft.body?.service?.status ?? ''}
-                    onChange={(_, value) =>
+                    value={draft.body?.service?.status?.code ?? ''}
+                    onChange={(code) =>
                       updateReverseOutputDraft((current) => ({
                         ...current,
                         body: {
                           ...(current.body ?? {}),
                           service: {
                             ...(current.body?.service ?? {}),
-                            status: value,
+                            status: {
+                              ...(current.body?.service?.status ?? {}),
+                              code,
+                            },
                           },
                         },
                       }))
                     }
+                    options={b3StatusOptions}
+                    placeholder="Выберите статус B3"
                   />
                 </FormGroup>
               </div>
@@ -3428,7 +3435,7 @@ function NodeViewer({ processConfig, selectedNodeId }) {
               <Title headingLevel="h5">B3Event Service</Title>
               <StaticField label="B3Event.body.service.scenario" value={node.body?.service?.scenario || '—'} />
               <StaticField label="B3Event.body.service.type" value={node.body?.service?.type || '—'} />
-              <StaticField label="B3Event.body.service.status" value={node.body?.service?.status || '—'} />
+              <StaticField label="B3Event.body.service.status" value={node.body?.service?.status?.code || '—'} />
             </div>
             <div className="viewer-section">
               <Title headingLevel="h5">SLA</Title>
@@ -4320,7 +4327,9 @@ export function App() {
       setExportErrorMessage('');
       setIsExportingProcessConfig(true);
 
-      const response = await fetch(`/api/process-configs/${activeProcessConfig.id}/export`);
+      const response = await fetch(
+        `/api/process-configs/${activeProcessConfig.id}/export?scheme=${encodeURIComponent(importScheme)}`,
+      );
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }

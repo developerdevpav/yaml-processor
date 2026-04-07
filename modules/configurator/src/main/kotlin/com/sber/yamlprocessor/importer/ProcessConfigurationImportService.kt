@@ -217,7 +217,7 @@ class ProcessConfigurationImportService(
         ServiceBody(
             scenario = scenario.orEmpty(),
             type = type.normalizedOrNull(),
-            status = status.normalizedOrNull(),
+            status = status.refOrNull(B3StatusDictionary::class.java),
             sla = sla?.toEntity()
         )
 

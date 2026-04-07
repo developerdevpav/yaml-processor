@@ -1,9 +1,11 @@
 package com.sber.yamlprocessor.graphql
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.node.JsonNodeFactory
 import com.fasterxml.jackson.databind.node.ArrayNode
 import com.fasterxml.jackson.databind.node.ObjectNode
 import com.fasterxml.jackson.dataformat.yaml.YAMLMapper
+import com.sber.yamlprocessor.importer.YamlImportScheme
 import com.sber.yamlprocessor.model.ContextCodesDictionary
 import com.sber.yamlprocessor.model.ProcessConfig
 import com.sber.yamlprocessor.model.Process
@@ -38,6 +40,12 @@ import org.springframework.graphql.execution.RuntimeWiringConfigurer
 import org.springframework.stereotype.Component
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import org.yaml.snakeyaml.DumperOptions
+import org.yaml.snakeyaml.Yaml
+import org.yaml.snakeyaml.nodes.Node
+import org.yaml.snakeyaml.nodes.Tag
+import org.yaml.snakeyaml.representer.Represent
+import org.yaml.snakeyaml.representer.Representer
 import java.text.Normalizer
 import java.lang.reflect.Field
 import java.lang.reflect.Member
@@ -46,6 +54,7 @@ import java.lang.reflect.Modifier
 import java.nio.charset.StandardCharsets
 import java.util.Collections
 import java.util.IdentityHashMap
+import java.util.LinkedHashMap
 import java.util.UUID
 
 @Configuration
@@ -844,9 +853,12 @@ class JpaGraphQlCrudService(
             when (field.kind) {
                 FieldKind.SCALAR, FieldKind.SCALAR_COLLECTION -> Unit
                 FieldKind.EMBEDDED -> {
-                    val current = getFieldValue(value, field.name) ?: return@forEach
                     @Suppress("UNCHECKED_CAST")
                     val nestedInput = rawFieldValue as? Map<String, Any?> ?: return@forEach
+                    val current = getFieldValue(value, field.name)
+                        ?: objectMapper.convertValue(nestedInput, field.targetClass).also {
+                            setFieldValue(value, field.name, it)
+                        }
                     coerceReferenceFields(current, nestedInput, registry.complexType(field.targetClass))
                 }
                 FieldKind.ENTITY_REFERENCE -> {
@@ -1009,17 +1021,28 @@ class ProcessConfigurationExportService(
     private val objectMapper: ObjectMapper
 ) {
     private val yamlMapper = YAMLMapper()
+    private val yaml = Yaml(FilterEventRuleRepresenter(), DumperOptions().apply {
+        defaultFlowStyle = DumperOptions.FlowStyle.BLOCK
+        isPrettyFlow = true
+        indent = 2
+        indicatorIndent = 1
+        defaultScalarStyle = DumperOptions.ScalarStyle.PLAIN
+    })
 
     @Transactional(readOnly = true)
-    fun exportProcessConfig(id: Any?): ProcessConfigurationExport {
+    fun exportProcessConfig(id: Any?, scheme: YamlImportScheme = YamlImportScheme.NEW): ProcessConfigurationExport {
         val processConfig = crudService.findProcessConfigForExport(id)
         val process = processConfig.process ?: error("ProcessConfig ${processConfig.id} does not contain process")
         val yamlTree = objectMapper.valueToTree<ObjectNode>(process).deepCopy()
         stripTechnicalFields(yamlTree)
+        val exportTree = when (scheme) {
+            YamlImportScheme.NEW -> yamlTree
+            YamlImportScheme.LEGACY -> wrapLegacyProcess(transformToLegacyTree(yamlTree))
+        }
 
         return ProcessConfigurationExport(
             filename = buildFilename(process),
-            content = yamlMapper.writeValueAsString(yamlTree)
+            content = yaml.dump(asYamlValue(exportTree))
         )
     }
 
@@ -1057,6 +1080,112 @@ class ProcessConfigurationExportService(
             ?: nodeComment
                 ?.trim()
                 ?.takeIf { it.isNotEmpty() }
+
+    private fun wrapLegacyProcess(processNode: ObjectNode): ObjectNode =
+        JsonNodeFactory.instance.objectNode().set<ObjectNode>("process", processNode)
+
+    private fun transformToLegacyTree(node: ObjectNode): ObjectNode {
+        val transformed = node.deepCopy()
+        transformLegacyNode(transformed)
+        return transformed
+    }
+
+    private fun transformLegacyNode(node: com.fasterxml.jackson.databind.JsonNode?) {
+        when (node) {
+            is ObjectNode -> {
+                node.remove("id")
+                node.remove("node_name")
+                node.remove("nodeName")
+                renameField(node, "duration_value", "durationValue")
+                renameField(node, "duration_unit", "durationUnit")
+                if (node.has("node_comment")) {
+                    val description = node.get("node_comment")
+                    node.remove("node_comment")
+                    if (description != null && !description.isNull) {
+                        node.set<com.fasterxml.jackson.databind.JsonNode>("description", description)
+                    }
+                }
+                if (node.has("nodeComment")) {
+                    val description = node.get("nodeComment")
+                    node.remove("nodeComment")
+                    if (!node.has("description") && description != null && !description.isNull) {
+                        node.set<com.fasterxml.jackson.databind.JsonNode>("description", description)
+                    }
+                }
+                node.fields().forEachRemaining { (_, value) ->
+                    transformLegacyNode(value)
+                }
+            }
+            is ArrayNode -> node.forEach(::transformLegacyNode)
+        }
+    }
+
+    private fun renameField(node: ObjectNode, source: String, target: String) {
+        if (!node.has(source)) {
+            return
+        }
+        val value = node.get(source)
+        node.remove(source)
+        if (!node.has(target) && value != null && !value.isNull) {
+            node.set<com.fasterxml.jackson.databind.JsonNode>(target, value)
+        }
+    }
+
+    private fun asYamlValue(
+        node: com.fasterxml.jackson.databind.JsonNode?,
+        fieldName: String? = null,
+        parentPath: List<String> = emptyList()
+    ): Any? =
+        when {
+            node == null || node.isNull -> null
+            node.isObject -> LinkedHashMap<String, Any?>().also { map ->
+                node.fields().forEachRemaining { (name, value) ->
+                    val yamlValue = asYamlValue(value, name, parentPath + name)
+                    if (yamlValue != null) {
+                        map[name] = yamlValue
+                    }
+                }
+            }
+            node.isArray -> node.map { asYamlValue(it, fieldName, parentPath) }
+            node.isTextual -> {
+                val text = node.textValue()
+                if (requiresNullForBlank(parentPath, text)) {
+                    null
+                } else if (requiresLiteralStyle(fieldName, parentPath)) {
+                    LiteralString(text)
+                } else {
+                    text
+                }
+            }
+            node.isBoolean -> node.booleanValue()
+            node.isIntegralNumber -> node.longValue()
+            node.isFloatingPointNumber -> node.doubleValue()
+            else -> yamlMapper.treeToValue(node, Any::class.java)
+        }
+
+    private fun requiresLiteralStyle(fieldName: String?, path: List<String>): Boolean =
+        fieldName == "filter-event-rule" ||
+            path.takeLast(2) == listOf("trigger", "rule") ||
+            path.takeLast(2) == listOf("output", "rule")
+
+    private fun requiresNullForBlank(path: List<String>, value: String): Boolean =
+        value.isEmpty() && (
+            path.takeLast(2) == listOf("service", "type") ||
+                path.takeLast(2) == listOf("service", "status")
+        )
+}
+
+private data class LiteralString(val value: String)
+
+private class FilterEventRuleRepresenter : Representer(DumperOptions()) {
+    init {
+        representers[LiteralString::class.java] = LiteralStringRepresent()
+    }
+
+    private inner class LiteralStringRepresent : Represent {
+        override fun representData(data: Any): Node =
+            representScalar(Tag.STR, (data as LiteralString).value, DumperOptions.ScalarStyle.LITERAL)
+    }
 }
 
 @Component

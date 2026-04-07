@@ -67,10 +67,14 @@ class SlaState(
     var status: SlaStatusDictionary? = null,
 
     @Column(name = "duration_value")
+    @field:JsonAlias("durationValue")
+    @field:JsonProperty("duration_value")
     var durationValue: Int? = null,
 
     @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "duration_unit", referencedColumnName = "code")
+    @field:JsonAlias("durationUnit")
+    @field:JsonProperty("duration_unit")
     var durationUnit: SlaDurationUnitDictionary? = null
 )
 
@@ -82,8 +86,9 @@ class Service(
     @Column(name = "type")
     var type: String? = null,
 
-    @Column(name = "status")
-    var status: String? = null,
+    @ManyToOne(fetch = FetchType.EAGER)
+    @JoinColumn(name = "status", referencedColumnName = "code")
+    var status: B3StatusDictionary? = null,
 
     @Embedded
     var sla: SlaState? = null
@@ -103,10 +108,13 @@ class Body(
     @AttributeOverrides(
         AttributeOverride(name = "scenario", column = Column(name = "body_service_scenario")),
         AttributeOverride(name = "type", column = Column(name = "body_service_type")),
-        AttributeOverride(name = "status", column = Column(name = "body_service_status")),
         AttributeOverride(name = "sla.durationValue", column = Column(name = "body_service_sla_duration_value")),
     )
     @AssociationOverrides(
+        AssociationOverride(
+            name = "status",
+            joinColumns = [JoinColumn(name = "body_service_status", referencedColumnName = "code")]
+        ),
         AssociationOverride(
             name = "sla.status",
             joinColumns = [JoinColumn(name = "body_service_sla_status", referencedColumnName = "code")]

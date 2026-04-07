@@ -4,10 +4,17 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.sber.yamlprocessor.model.ActionPhasesDictionary
 import com.sber.yamlprocessor.model.B3StatusDictionary
 import com.sber.yamlprocessor.model.ContextCodesDictionary
+import com.sber.yamlprocessor.model.Process
+import com.sber.yamlprocessor.model.ProcessConfig
+import com.sber.yamlprocessor.model.Configurator
 import com.sber.yamlprocessor.model.Result
 import com.sber.yamlprocessor.model.Reverse
 import com.sber.yamlprocessor.model.ReverseOutput
+import com.sber.yamlprocessor.model.Service
+import com.sber.yamlprocessor.model.SlaStatusDictionary
 import com.sber.yamlprocessor.model.Stage
+import com.sber.yamlprocessor.model.Subprocess
+import jakarta.persistence.EntityManager
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -15,6 +22,7 @@ import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.graphql.execution.GraphQlSource
+import org.springframework.transaction.annotation.Transactional
 
 @SpringBootTest
 class JpaGraphQlSupportTest {
@@ -27,6 +35,12 @@ class JpaGraphQlSupportTest {
 
     @Autowired
     lateinit var registry: JpaGraphQlRegistry
+
+    @Autowired
+    lateinit var crudService: JpaGraphQlCrudService
+
+    @Autowired
+    lateinit var entityManager: EntityManager
 
     @Test
     fun `builds graphql schema from jpa model`() {
@@ -79,7 +93,8 @@ class JpaGraphQlSupportTest {
                     "eventObject" to mapOf("type" to "event-type"),
                     "service" to mapOf(
                         "scenario" to "service-scenario",
-                        "type" to "service-type"
+                        "type" to "service-type",
+                        "status" to mapOf("code" to "RUNNING")
                     )
                 ),
                 "log" to mapOf(
@@ -94,6 +109,7 @@ class JpaGraphQlSupportTest {
         assertEquals("event-type", output.body.eventObject?.type)
         assertEquals("service-scenario", output.body.service?.scenario)
         assertEquals("service-type", output.body.service?.type)
+        assertEquals("RUNNING", output.body.service?.status?.code)
         assertEquals("journal-name", output.log.journalServiceName)
         assertEquals("log-message", output.log.message)
     }
@@ -103,9 +119,65 @@ class JpaGraphQlSupportTest {
         val reverseStatusField = registry.entity(Reverse::class.java).fields.first { it.name == "status" }
         val reverseOutputPhaseField = registry.entity(ReverseOutput::class.java).fields.first { it.name == "phase" }
         val stageContextCodeField = registry.entity(Stage::class.java).fields.first { it.name == "contextCode" }
+        val serviceStatusField = registry.complexType(Service::class.java).fields.first { it.name == "status" }
+        val slaStatusField = registry.complexType(com.sber.yamlprocessor.model.SlaState::class.java).fields.first { it.name == "status" }
 
         assertEquals(B3StatusDictionary::class.java, reverseStatusField.targetClass)
         assertEquals(ActionPhasesDictionary::class.java, reverseOutputPhaseField.targetClass)
         assertEquals(ContextCodesDictionary::class.java, stageContextCodeField.targetClass)
+        assertEquals(B3StatusDictionary::class.java, serviceStatusField.targetClass)
+        assertEquals(SlaStatusDictionary::class.java, slaStatusField.targetClass)
+    }
+
+    @Test
+    @Transactional
+    fun `persists reverse output sla duration value`() {
+        val processConfig = ProcessConfig()
+        val process = Process(processConfig = processConfig)
+        val subprocess = Subprocess(process = process)
+        val stage = Stage(subprocess = subprocess, executor = "executor.alpha")
+        val configurator = Configurator(stage = stage)
+        val result = Result(configurator = configurator)
+        val reverse = Reverse(result = result, status = B3StatusDictionary(code = "INITIATED"))
+        processConfig.process = process
+        process.subprocess = mutableListOf(subprocess)
+        subprocess.stages = mutableListOf(stage)
+        stage.configurator = configurator
+        configurator.result = mutableListOf(result)
+        result.reverse = mutableListOf(reverse)
+        entityManager.persist(processConfig)
+        entityManager.flush()
+
+        val created = crudService.createReverseOutputNode(
+            reverse.id,
+            mapOf(
+                "phase" to mapOf("code" to "START"),
+                "body" to mapOf(
+                    "service" to mapOf(
+                        "scenario" to "scenario_a",
+                        "sla" to mapOf(
+                            "durationValue" to 15,
+                            "durationUnit" to mapOf("code" to "MINUTES"),
+                            "status" to mapOf("code" to "INIT")
+                        )
+                    ),
+                    "type" to "SERVICE"
+                )
+            )
+        )
+
+        entityManager.flush()
+        entityManager.clear()
+
+        val persisted = entityManager.find(ReverseOutput::class.java, created.id)
+        assertEquals(15, persisted.body.service?.sla?.durationValue)
+
+        val rawValue = entityManager.createNativeQuery(
+            "select body_service_sla_duration_value from reverse_output where id = :id"
+        )
+            .setParameter("id", created.id)
+            .singleResult as Number?
+
+        assertEquals(15, rawValue?.toInt())
     }
 }
