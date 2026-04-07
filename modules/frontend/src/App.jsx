@@ -1,5 +1,5 @@
 import { gql, useMutation, useQuery } from '@apollo/client';
-import { AlertCircle, CheckVerified02, Edit01, Eye, File02, Plus, Rows01, Sale01, Save01, Trash01, XCircle, XClose } from '@untitledui/icons';
+import { AlertCircle, BellRinging04, CheckVerified02, Edit01, Eye, File02, Menu04, NotificationBox, Plus, Rows01, Save01, Trash01, XCircle, XClose, ZapCircle } from '@untitledui/icons';
 import { useEffect, useRef, useState } from 'react';
 import { Button as AriaButton, Menu, MenuItem, MenuTrigger, Popover } from 'react-aria-components';
 import ReactFlow, {
@@ -218,6 +218,66 @@ function YamlActionsMenu({
   );
 }
 
+function TopologyActionsMenu({
+  onDeleteProcessConfig,
+  onImportProcessConfig,
+  onExportProcessConfig,
+  isDeleting = false,
+  isImporting = false,
+  isExporting = false,
+  canDelete = false,
+  canExport = false,
+}) {
+  const isBusy = isDeleting || isImporting || isExporting;
+
+  return (
+    <MenuTrigger>
+      <AriaButton
+        className={cn(
+          'inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-300 transition hover:bg-slate-50',
+          isBusy && 'cursor-not-allowed opacity-60',
+        )}
+        isDisabled={isBusy}
+        aria-label="Действия с процессом"
+      >
+        {isBusy ? (
+          <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+        ) : (
+          <Menu04 aria-hidden size={16} />
+        )}
+        Действия
+      </AriaButton>
+      <Popover
+        offset={6}
+        className="min-w-[220px] overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-[0_12px_32px_rgba(16,24,40,0.12)] outline-none"
+      >
+        <Menu className="outline-none">
+          <MenuItem
+            onAction={onImportProcessConfig}
+            className="cursor-pointer rounded-lg px-3 py-2 text-sm text-slate-700 outline-none transition hover:bg-slate-50"
+          >
+            Импортировать YAML
+          </MenuItem>
+          <MenuItem
+            onAction={onExportProcessConfig}
+            isDisabled={!canExport}
+            className="cursor-pointer rounded-lg px-3 py-2 text-sm text-slate-700 outline-none transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Экспортировать YAML
+          </MenuItem>
+          <MenuItem
+            onAction={onDeleteProcessConfig}
+            isDisabled={!canDelete}
+            className="cursor-pointer rounded-lg px-3 py-2 text-sm text-rose-600 outline-none transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Удалить процесс
+          </MenuItem>
+        </Menu>
+      </Popover>
+    </MenuTrigger>
+  );
+}
+
 function Toast({ title, message, onClose, variant = 'success' }) {
   const isError = variant === 'error';
   return (
@@ -378,6 +438,87 @@ function FileUploadModal({
   );
 }
 
+function ExportTypeModal({
+  isOpen,
+  exportType,
+  isSubmitting,
+  errorMessage,
+  onClose,
+  onSubmit,
+  onExportTypeChange,
+}) {
+  useEffect(() => {
+    if (!isOpen) {
+      return undefined;
+    }
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
+  if (!isOpen) {
+    return null;
+  }
+
+  return (
+    <div className="modal-shell" role="dialog" aria-modal="true" aria-labelledby="yaml-export-title">
+      <div className="modal-shell__backdrop" onClick={onClose} />
+      <div className="modal-card">
+        <div className="modal-card__header">
+          <div>
+            <Title headingLevel="h4" className="modal-card__title">
+              <span id="yaml-export-title">Экспортировать YAML</span>
+            </Title>
+            <Text className="modal-card__subtitle">
+              Выберите тип экспорта процесса перед скачиванием файла.
+            </Text>
+          </div>
+          <button type="button" className="modal-card__close" onClick={onClose} aria-label="Закрыть окно экспорта">
+            <XClose aria-hidden size={18} />
+          </button>
+        </div>
+
+        <FormGroup label="Тип экспорта" fieldId="yaml-export-type">
+          <ProcessSelectField
+            id="yaml-export-type"
+            value={exportType}
+            onChange={onExportTypeChange}
+            options={[
+              { value: 'DEFAULT', label: 'Default' },
+              { value: 'LEGACY', label: 'Legacy' },
+            ]}
+            placeholder="Выберите тип"
+            isDisabled={isSubmitting}
+          />
+        </FormGroup>
+
+        <div className="export-modal__hint">
+          {exportType === 'LEGACY'
+            ? 'Legacy: без id, node_name и node_comment. Значение node_name переносится в description, null и пустые строки не экспортируются.'
+            : 'Default: процесс экспортируется как есть, но null и пустые строки не попадают в YAML.'}
+        </div>
+
+        {errorMessage && <div className="file-uploader__error">{errorMessage}</div>}
+
+        <div className="modal-card__footer">
+          <Button variant="secondary" onClick={onClose} isDisabled={isSubmitting}>
+            Отмена
+          </Button>
+          <Button onClick={onSubmit} isLoading={isSubmitting}>
+            Скачать
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function EmptyState({ children }) {
   return <div className="flex h-full min-h-[24rem] items-center justify-center">{children}</div>;
 }
@@ -470,12 +611,25 @@ function formatJsonSnippet(value) {
   }
 }
 
+function stringifyJsonForEditor(value) {
+  if (value === undefined) {
+    return '';
+  }
+
+  const serialized = JSON.stringify(value, null, 2);
+  return serialized ?? 'null';
+}
+
 function JsonSnippetEditor({
   id,
   value,
   onChange,
   error,
   helperText,
+  readOnly = false,
+  onBeautify,
+  onOpenPlayground,
+  playgroundLabel = 'Открыть playground JsonLogic',
 }) {
   const containerRef = useRef(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -508,24 +662,141 @@ function JsonSnippetEditor({
   return (
     <div ref={containerRef} className={cn('json-snippet', isFullscreen && 'json-snippet-fullscreen')}>
       <div className="json-snippet__toolbar">
-        <button
-          type="button"
-          className="json-snippet__fullscreen"
-          onClick={toggleFullscreen}
-          aria-label={isFullscreen ? 'Свернуть редактор кода' : 'Развернуть редактор кода на весь экран'}
-        >
-          {isFullscreen ? 'Свернуть' : 'На весь экран'}
-        </button>
+        <div className="json-snippet__toolbar-actions">
+          {onBeautify && (
+            <button
+              type="button"
+              className="json-snippet__action"
+              onClick={onBeautify}
+              aria-label="Отформатировать JSON"
+              title="Отформатировать JSON"
+            >
+              Beautify JSON
+            </button>
+          )}
+          {onOpenPlayground && (
+            <button
+              type="button"
+              className="json-snippet__action"
+              onClick={onOpenPlayground}
+              aria-label={playgroundLabel}
+              title={playgroundLabel}
+            >
+              <ZapCircle aria-hidden size={14} />
+              Playground
+            </button>
+          )}
+          <button
+            type="button"
+            className="json-snippet__action"
+            onClick={toggleFullscreen}
+            aria-label={isFullscreen ? 'Свернуть редактор кода' : 'Развернуть редактор кода на весь экран'}
+          >
+            {isFullscreen ? 'Свернуть' : 'На весь экран'}
+          </button>
+        </div>
       </div>
       <textarea
         id={id}
         className="json-snippet__textarea"
         spellCheck={false}
         value={value}
+        readOnly={readOnly}
         onChange={(event) => onChange(event.target.value)}
       />
       {helperText && <p className="json-snippet__helper">{helperText}</p>}
       {error && <p className="json-snippet__error">{error}</p>}
+    </div>
+  );
+}
+
+function JsonLogicPlaygroundModal({
+  isOpen,
+  title,
+  inputText,
+  ruleText,
+  resultText,
+  isSubmitting,
+  errorMessage,
+  onClose,
+  onInputChange,
+  onEvaluate,
+}) {
+  useEffect(() => {
+    if (!isOpen) {
+      return undefined;
+    }
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
+  if (!isOpen) {
+    return null;
+  }
+
+  return (
+    <div className="modal-shell" role="dialog" aria-modal="true" aria-labelledby="jsonlogic-playground-title">
+      <div className="modal-shell__backdrop" onClick={onClose} />
+      <div className="modal-card modal-card-playground">
+        <div className="modal-card__header">
+          <div>
+            <Title headingLevel="h4" className="modal-card__title">
+              <span id="jsonlogic-playground-title">Playground JsonLogic</span>
+            </Title>
+          </div>
+          <button type="button" className="modal-card__close" onClick={onClose} aria-label="Закрыть playground">
+            <XClose aria-hidden size={18} />
+          </button>
+        </div>
+
+        <div className="jsonlogic-playground">
+          <div className="jsonlogic-playground__panel">
+            <div className="jsonlogic-playground__panel-header">
+              <Title headingLevel="h5">JSON-объект</Title>
+            </div>
+            <JsonSnippetEditor
+              id="jsonlogic-playground-input"
+              value={inputText}
+              onChange={onInputChange}
+              onBeautify={() => onInputChange(formatJsonSnippet(inputText))}
+              helperText="Укажите JSON, на котором нужно проверить правило."
+            />
+          </div>
+
+          <div className="jsonlogic-playground__action">
+            <Button onClick={onEvaluate} isLoading={isSubmitting}>
+              Проверить
+            </Button>
+            <div className="jsonlogic-playground__result">
+              <div className="jsonlogic-playground__result-label">Результат</div>
+              <pre className="jsonlogic-playground__result-code">{resultText || '—'}</pre>
+            </div>
+            {errorMessage && <p className="jsonlogic-playground__error">{errorMessage}</p>}
+          </div>
+
+          <div className="jsonlogic-playground__panel">
+            <div className="jsonlogic-playground__panel-header">
+              <Title headingLevel="h5">Текущее правило</Title>
+              <Text component="small">Содержимое будет передано в backend как `rule`.</Text>
+            </div>
+            <JsonSnippetEditor
+              id="jsonlogic-playground-rule"
+              value={ruleText}
+              onChange={() => {}}
+              onBeautify={() => {}}
+              readOnly
+              helperText="Правило отображается только для чтения и берется из текущей панели."
+            />
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -750,6 +1021,14 @@ const UPDATE_SUBPROCESS_NODE = gql`
 const REORDER_SUBPROCESS_STAGES = gql`
   mutation ReorderSubprocessStages($subprocessId: ID!, $stageIds: [ID!]!) {
     reorderSubprocessStages(subprocessId: $subprocessId, stageIds: $stageIds) {
+      id
+    }
+  }
+`;
+
+const REORDER_REVERSE_OUTPUTS = gql`
+  mutation ReorderReverseOutputs($reverseId: ID!, $outputIds: [ID!]!) {
+    reorderReverseOutputs(reverseId: $reverseId, outputIds: $outputIds) {
       id
     }
   }
@@ -1395,7 +1674,7 @@ function getReverseLayout(stage, resultIndex, reverse, reverseIndex, expandedSet
     ? (reverse.output ?? []).map((output, outputIndex) => getReverseOutputLayout(stage, resultIndex, reverseIndex, output, outputIndex))
     : [];
   const statusValue = reverse.status?.code || 'STATUS не задан';
-  const summaryItems = [{ value: statusValue }];
+  const summaryItems = [{ value: statusValue, icon: 'notification' }];
   const nodeHeight = estimateReverseNodeHeight(statusValue, (reverse.output?.length ?? 0) > 0);
 
   return {
@@ -2044,13 +2323,13 @@ function ProcessNode({ data, selected }) {
         <button type="button" className="process-node__edit" onClick={editNode} aria-label="Edit node" title="Edit">
           <Edit01 aria-hidden className="process-node__edit-icon" size={18} />
         </button>
-        {kind === 'subprocess' && (
+        {(kind === 'subprocess' || kind === 'reverse') && (
           <button
             type="button"
             className="process-node__action process-node__action-order"
             onClick={reorderStages}
-            aria-label="Change stage order"
-            title="Change stage order"
+            aria-label={kind === 'reverse' ? 'Change reverse output order' : 'Change stage order'}
+            title={kind === 'reverse' ? 'Change reverse output order' : 'Change stage order'}
           >
             <Rows01 aria-hidden className="process-node__edit-icon" size={18} />
           </button>
@@ -2120,9 +2399,12 @@ function ProcessNode({ data, selected }) {
             >
               {kind === 'result' || kind === 'reverseOutput' ? (
                 <div className="process-node__summary-list-item">
-                  {kind === 'result' && <Sale01 aria-hidden className="process-node__summary-icon" size={16} />}
+                  {kind === 'result' && <BellRinging04 aria-hidden className="process-node__summary-icon" size={16} />}
+                  {kind === 'reverse' && item.icon === 'notification' && (
+                    <NotificationBox aria-hidden className="process-node__summary-icon" size={16} />
+                  )}
                   {kind === 'reverseOutput' && item.icon === 'send' && (
-                    <File02 aria-hidden className="process-node__summary-icon" size={16} />
+                    <ZapCircle aria-hidden className="process-node__summary-icon" size={16} />
                   )}
                   {kind === 'reverseOutput' && item.icon === 'check' && (
                     <CheckVerified02
@@ -2181,6 +2463,7 @@ function ProcessTopology({
   onEditNode,
   onViewNode,
   onReorderSubprocessNode,
+  onReorderReverseNode,
   onDeleteNode,
   onAddChildNode,
   onAddSubprocess,
@@ -2211,19 +2494,14 @@ function ProcessTopology({
             <Button onClick={onCreateProcess} isLoading={isCreating} isDisabled={isCreateDisabled}>
               Создать процесс
             </Button>
-            <Button
-              variant="secondary"
-              onClick={onDeleteProcessConfig}
-              isLoading={isDeleting}
-              isDisabled={!selectedProcessConfigId}
-            >
-              Удалить процесс
-            </Button>
-            <YamlActionsMenu
-              onImport={onImportProcessConfig}
-              onExport={onExportProcessConfig}
+            <TopologyActionsMenu
+              onDeleteProcessConfig={onDeleteProcessConfig}
+              onImportProcessConfig={onImportProcessConfig}
+              onExportProcessConfig={onExportProcessConfig}
+              isDeleting={isDeleting}
               isImporting={isImporting}
               isExporting={isExporting}
+              canDelete={Boolean(selectedProcessConfigId)}
               canExport={Boolean(selectedProcessConfigId)}
             />
             <ProcessSelectField
@@ -2236,6 +2514,8 @@ function ProcessTopology({
               isDisabled={processConfigOptions.length === 0}
             />
           </div>
+        </div>
+        <div className="topology-canvas__fullscreen">
           <Button variant="secondary" onClick={onToggleFullscreen}>
             {isFullscreen ? 'Свернуть экран' : 'На весь экран'}
           </Button>
@@ -2248,7 +2528,12 @@ function ProcessTopology({
               ...node.data,
               onEdit: () => onEditNode(node.id),
               onView: () => onViewNode(node.id),
-              onReorder: node.data.kind === 'subprocess' ? () => onReorderSubprocessNode(node.id) : undefined,
+              onReorder:
+                node.data.kind === 'subprocess'
+                  ? () => onReorderSubprocessNode(node.id)
+                  : node.data.kind === 'reverse'
+                    ? () => onReorderReverseNode(node.id)
+                    : undefined,
               onDelete: () => onDeleteNode(node.id),
               onAddChild:
                 node.data.kind === 'process'
@@ -2283,6 +2568,7 @@ function NodeEditor({
   onSave,
   onDraftChange,
   onAutosaveStatusChange,
+  onOpenJsonLogicPlayground,
   onAddSubprocess,
   onBulkCreateResults,
   contextCodeOptions,
@@ -2793,6 +3079,10 @@ function NodeEditor({
                   onChange={(value) => {
                     setFilterEventRuleText(value);
                   }}
+                  onBeautify={handleFormatFilterEventRule}
+                  onOpenPlayground={() =>
+                    onOpenJsonLogicPlayground?.('Playground для Filter event rule', filterEventRuleText)
+                  }
                   helperText="Редактируйте Filter event rule как JSON. Для выравнивания отступов используйте кнопку форматирования."
                   error={filterEventRuleError}
                 />
@@ -2800,11 +3090,6 @@ function NodeEditor({
                   Каждое событие, необходимое для фильтрации, будет проверено данным правилом. Если событие будет
                   проходить по данному правилу, то оно будет обработано, в ином случае стадия будет проигнорирована.
                 </Text>
-                <div className="json-status-actions">
-                  <Button variant="secondary" onClick={handleFormatFilterEventRule}>
-                    Форматировать JSON
-                  </Button>
-                </div>
               </div>
               <div className="stage-editor-section">
                 <Title headingLevel="h4">Настройка состояния стадии</Title>
@@ -2914,14 +3199,13 @@ function NodeEditor({
                 onChange={(value) => {
                   setSubprocessTriggerText(value);
                 }}
+                onBeautify={handleFormatSubprocessTrigger}
+                onOpenPlayground={() =>
+                  onOpenJsonLogicPlayground?.('Playground для JsonLogic правила запуска', subprocessTriggerText)
+                }
                 helperText="Редактируйте JsonLogic правило запуска как JSON. Для выравнивания отступов используйте кнопку форматирования."
                 error={subprocessTriggerError}
               />
-              <div className="json-status-actions">
-                <Button variant="secondary" onClick={handleFormatSubprocessTrigger}>
-                  Форматировать JSON
-                </Button>
-              </div>
             </div>
           )}
 
@@ -3044,14 +3328,13 @@ function NodeEditor({
                   onChange={(value) => {
                     setReverseOutputRuleText(value);
                   }}
+                  onBeautify={handleFormatReverseOutputRule}
+                  onOpenPlayground={() =>
+                    onOpenJsonLogicPlayground?.('Playground для правила JsonLogic отправки', reverseOutputRuleText)
+                  }
                   helperText="Редактируйте правило для отправляемого события как JSON. Для выравнивания отступов используйте кнопку форматирования."
                   error={reverseOutputRuleError}
                 />
-                <div className="json-status-actions">
-                  <Button variant="secondary" onClick={handleFormatReverseOutputRule}>
-                    Форматировать JSON
-                  </Button>
-                </div>
               </div>
               <div className="stage-editor-subsection">
                 <Title headingLevel="h5">B3Event Body</Title>
@@ -3283,72 +3566,88 @@ function NodeEditor({
   );
 }
 
-function StageOrderEditor({ processConfig, subprocessNodeId, onReorderStages, isSaving }) {
-  const selected = findSelectedNode(processConfig, subprocessNodeId);
-  const [stageOrder, setStageOrder] = useState([]);
-  const [draggedStageId, setDraggedStageId] = useState(null);
-  const stageOrderRef = useRef([]);
-  const selectedSubprocessStageIds =
-    selected?.kind === 'subprocess' ? (selected.node?.stages ?? []).map((stage) => String(stage.id)).join('|') : '';
+function NodeOrderEditor({ processConfig, selectedNodeId, onReorderStages, onReorderReverseOutputs, isSaving }) {
+  const selected = findSelectedNode(processConfig, selectedNodeId);
+  const [itemOrder, setItemOrder] = useState([]);
+  const [draggedItemId, setDraggedItemId] = useState(null);
+  const itemOrderRef = useRef([]);
+  const selectedItemIds =
+    selected?.kind === 'subprocess'
+      ? (selected.node?.stages ?? []).map((stage) => String(stage.id)).join('|')
+      : selected?.kind === 'reverse'
+        ? (selected.node?.output ?? []).map((output) => String(output.id)).join('|')
+        : '';
 
   useEffect(() => {
-    if (selected?.kind !== 'subprocess') {
-      setStageOrder([]);
-      stageOrderRef.current = [];
-      setDraggedStageId(null);
+    if (selected?.kind !== 'subprocess' && selected?.kind !== 'reverse') {
+      setItemOrder([]);
+      itemOrderRef.current = [];
+      setDraggedItemId(null);
       return;
     }
 
-    const nextStageOrder = (selected.node?.stages ?? []).map((stage) => String(stage.id));
-    setStageOrder(nextStageOrder);
-    stageOrderRef.current = nextStageOrder;
-    setDraggedStageId(null);
-  }, [subprocessNodeId, selected?.kind, selectedSubprocessStageIds]);
+    const nextItemOrder =
+      selected.kind === 'subprocess'
+        ? (selected.node?.stages ?? []).map((stage) => String(stage.id))
+        : (selected.node?.output ?? []).map((output) => String(output.id));
+    setItemOrder(nextItemOrder);
+    itemOrderRef.current = nextItemOrder;
+    setDraggedItemId(null);
+  }, [selectedNodeId, selected?.kind, selectedItemIds]);
 
-  const orderedStages =
+  const orderedItems =
     selected?.kind === 'subprocess'
-      ? stageOrder
+      ? itemOrder
           .map((stageId) => (selected.node?.stages ?? []).find((stage) => String(stage.id) === stageId))
           .filter(Boolean)
+      : selected?.kind === 'reverse'
+        ? itemOrder
+            .map((outputId) => (selected.node?.output ?? []).find((output) => String(output.id) === outputId))
+            .filter(Boolean)
       : [];
 
-  const handlePointerDown = (stageId) => {
-    setDraggedStageId(stageId);
+  const handlePointerDown = (itemId) => {
+    setDraggedItemId(itemId);
   };
 
-  const handlePointerEnter = (targetStageId) => {
-    if (!draggedStageId || draggedStageId === targetStageId) {
+  const handlePointerEnter = (targetItemId) => {
+    if (!draggedItemId || draggedItemId === targetItemId) {
       return;
     }
 
-    const currentOrder = stageOrderRef.current;
-    const fromIndex = currentOrder.indexOf(draggedStageId);
-    const toIndex = currentOrder.indexOf(targetStageId);
+    const currentOrder = itemOrderRef.current;
+    const fromIndex = currentOrder.indexOf(draggedItemId);
+    const toIndex = currentOrder.indexOf(targetItemId);
     if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) {
       return;
     }
 
     const nextOrder = reorderItems(currentOrder, fromIndex, toIndex);
-    stageOrderRef.current = nextOrder;
-    setStageOrder(nextOrder);
+    itemOrderRef.current = nextOrder;
+    setItemOrder(nextOrder);
   };
 
   const handlePointerUp = async () => {
-    const nextStageOrder = [...stageOrderRef.current];
-    setDraggedStageId(null);
+    const nextItemOrder = [...itemOrderRef.current];
+    setDraggedItemId(null);
 
-    if (selected?.kind !== 'subprocess' || !selected.node?.id) {
+    if ((selected?.kind !== 'subprocess' && selected?.kind !== 'reverse') || !selected.node?.id) {
       return;
     }
 
-    if (nextStageOrder.join('|') === selectedSubprocessStageIds) {
+    if (nextItemOrder.join('|') === selectedItemIds) {
       return;
     }
 
-    await onReorderStages(String(selected.node.id), nextStageOrder);
+    if (selected.kind === 'subprocess') {
+      await onReorderStages(String(selected.node.id), nextItemOrder);
+      return;
+    }
+
+    await onReorderReverseOutputs(String(selected.node.id), nextItemOrder);
   };
 
-  if (selected?.kind !== 'subprocess') {
+  if (selected?.kind !== 'subprocess' && selected?.kind !== 'reverse') {
     return null;
   }
 
@@ -3357,27 +3656,38 @@ function StageOrderEditor({ processConfig, subprocessNodeId, onReorderStages, is
       <CardBody>
         <div className="stage-order-panel stage-order-panel-standalone">
           <div className="stage-order-list">
-            {orderedStages.map((stage, index) => {
-              const stageId = String(stage.id);
+            {orderedItems.map((item, index) => {
+              const itemId = String(item.id);
+              const isStage = selected.kind === 'subprocess';
               return (
                 <button
-                  key={stageId}
+                  key={itemId}
                   type="button"
                   disabled={isSaving}
-                  className={draggedStageId === stageId ? 'stage-order-item dragging' : 'stage-order-item'}
-                  onPointerDown={() => handlePointerDown(stageId)}
-                  onPointerEnter={() => handlePointerEnter(stageId)}
+                  className={draggedItemId === itemId ? 'stage-order-item dragging' : 'stage-order-item'}
+                  onPointerDown={() => handlePointerDown(itemId)}
+                  onPointerEnter={() => handlePointerEnter(itemId)}
                   onPointerUp={handlePointerUp}
                   onPointerLeave={(event) => {
-                    if (event.buttons === 0 && draggedStageId) {
+                    if (event.buttons === 0 && draggedItemId) {
                       handlePointerUp();
                     }
                   }}
                 >
                   <span className="stage-order-item__index">{index + 1}</span>
                   <span className="stage-order-item__content">
-                    <strong>{stage.nodeName || 'stage'}</strong>
-                    <small>{stage.nodeComment || 'Без описания'}</small>
+                    <strong>
+                      {isStage
+                        ? item.nodeName || 'stage'
+                        : item.phase?.code
+                          ? formatReverseOutputEventType(item.phase.code)
+                          : item.name || 'reverse output'}
+                    </strong>
+                    <small>
+                      {isStage
+                        ? item.nodeComment || 'Без описания'
+                        : item.body?.service?.scenario || item.body?.type || 'Без описания'}
+                    </small>
                   </span>
                   <span className="stage-order-item__handle">::</span>
                 </button>
@@ -3516,6 +3826,9 @@ export function App() {
   const [reorderSubprocessStages, reorderSubprocessStagesState] = useMutation(REORDER_SUBPROCESS_STAGES, {
     fetchPolicy: 'no-cache',
   });
+  const [reorderReverseOutputs, reorderReverseOutputsState] = useMutation(REORDER_REVERSE_OUTPUTS, {
+    fetchPolicy: 'no-cache',
+  });
   const [updateProcessNode, updateProcessNodeState] = useMutation(UPDATE_PROCESS_NODE, {
     fetchPolicy: 'no-cache',
   });
@@ -3565,7 +3878,7 @@ export function App() {
   const [selectedNodeId, setSelectedNodeId] = useState(null);
   const [editorNodeId, setEditorNodeId] = useState(null);
   const [viewerNodeId, setViewerNodeId] = useState(null);
-  const [stageOrderNodeId, setStageOrderNodeId] = useState(null);
+  const [orderNodeId, setOrderNodeId] = useState(null);
   const [expandedNodeIds, setExpandedNodeIds] = useState([]);
   const [createErrorMessage, setCreateErrorMessage] = useState('');
   const [updateErrorMessage, setUpdateErrorMessage] = useState('');
@@ -3577,10 +3890,19 @@ export function App() {
   const [editorPreview, setEditorPreview] = useState(null);
   const [toast, setToast] = useState(null);
   const [isExportingProcessConfig, setIsExportingProcessConfig] = useState(false);
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isImportingProcessConfig, setIsImportingProcessConfig] = useState(false);
   const [importFiles, setImportFiles] = useState([]);
   const [importScheme, setImportScheme] = useState('NEW');
+  const [exportType, setExportType] = useState('DEFAULT');
+  const [isJsonLogicPlaygroundOpen, setIsJsonLogicPlaygroundOpen] = useState(false);
+  const [jsonLogicPlaygroundTitle, setJsonLogicPlaygroundTitle] = useState('');
+  const [jsonLogicPlaygroundInput, setJsonLogicPlaygroundInput] = useState('{}');
+  const [jsonLogicPlaygroundRule, setJsonLogicPlaygroundRule] = useState('{}');
+  const [jsonLogicPlaygroundResult, setJsonLogicPlaygroundResult] = useState('');
+  const [jsonLogicPlaygroundError, setJsonLogicPlaygroundError] = useState('');
+  const [isEvaluatingJsonLogic, setIsEvaluatingJsonLogic] = useState(false);
   const [autosaveStatus, setAutosaveStatus] = useState(null);
   const topologyContainerRef = useRef(null);
 
@@ -3591,15 +3913,20 @@ export function App() {
   const slaDurationUnitOptions = (data?.slaDurationUnitDictionaryList ?? []).map((item) => item.code).filter(Boolean);
   const slaStatusOptions = (data?.slaStatusDictionaryList ?? []).map((item) => item.code).filter(Boolean);
   const processCodeOptions = (data?.contextCodesDictionaryList ?? []).map((item) => item.code).filter(Boolean);
-  const processConfigOptions = processConfigs.map((item) => ({
-    value: item.id,
-    label: item.process?.contextCode?.code || item.process?.nodeName || `Process ${item.id}`,
-    description: `ID: ${item.id} | Создан: ${formatDateTime(item.createdAt)} | Обновлен: ${formatDateTime(item.updatedAt)}`,
-  }));
+  const processConfigOptions = processConfigs.map((item) => {
+    const processName = item.process?.nodeName?.trim() || item.process?.contextCode?.code?.trim() || 'Process';
+
+    return {
+      value: item.id,
+      label: `${processName} - ${item.id}`,
+      description: `ID: ${item.id} | Создан: ${formatDateTime(item.createdAt)} | Обновлен: ${formatDateTime(item.updatedAt)}`,
+    };
+  });
   const editorIsSaving =
     createSubprocessState.loading ||
     createStageState.loading ||
     reorderSubprocessStagesState.loading ||
+    reorderReverseOutputsState.loading ||
     updateState.loading ||
     updateStageState.loading ||
     updateConfiguratorState.loading ||
@@ -3645,7 +3972,7 @@ export function App() {
       setSelectedNodeId(activeProcessConfig.process?.id ? `process:${activeProcessConfig.process.id}` : null);
       setEditorNodeId(null);
       setViewerNodeId(null);
-      setStageOrderNodeId(null);
+      setOrderNodeId(null);
       setEditorPreview(null);
       setAutosaveStatus(null);
       setExpandedNodeIds(getDefaultExpandedNodeIds(activeProcessConfig));
@@ -4108,7 +4435,7 @@ export function App() {
     setSelectedNodeId(nodeId);
     setEditorNodeId(nodeId);
     setViewerNodeId(null);
-    setStageOrderNodeId(null);
+    setOrderNodeId(null);
     setIsEditorOpen(true);
   };
 
@@ -4116,7 +4443,7 @@ export function App() {
     setSelectedNodeId(nodeId);
     setViewerNodeId(nodeId);
     setEditorNodeId(null);
-    setStageOrderNodeId(null);
+    setOrderNodeId(null);
     setIsEditorOpen(false);
   };
 
@@ -4124,7 +4451,15 @@ export function App() {
     setSelectedNodeId(nodeId);
     setViewerNodeId(null);
     setEditorNodeId(null);
-    setStageOrderNodeId(nodeId);
+    setOrderNodeId(nodeId);
+    setIsEditorOpen(false);
+  };
+
+  const handleReorderReverseNode = (nodeId) => {
+    setSelectedNodeId(nodeId);
+    setViewerNodeId(null);
+    setEditorNodeId(null);
+    setOrderNodeId(nodeId);
     setIsEditorOpen(false);
   };
 
@@ -4303,8 +4638,8 @@ export function App() {
       if (viewerNodeId === nodeId) {
         setViewerNodeId(null);
       }
-      if (stageOrderNodeId === nodeId) {
-        setStageOrderNodeId(null);
+      if (orderNodeId === nodeId) {
+        setOrderNodeId(null);
       }
       setSelectedNodeId(null);
       await refetch();
@@ -4324,8 +4659,8 @@ export function App() {
     setViewerNodeId(null);
   };
 
-  const handleCloseStageOrderPanel = () => {
-    setStageOrderNodeId(null);
+  const handleCloseOrderPanel = () => {
+    setOrderNodeId(null);
   };
 
   const handleToggleTopologyFullscreen = async () => {
@@ -4347,13 +4682,35 @@ export function App() {
     setLocalProcessConfig(null);
     setEditorNodeId(null);
     setViewerNodeId(null);
-    setStageOrderNodeId(null);
+    setOrderNodeId(null);
     setEditorPreview(null);
     setIsEditorOpen(false);
     setAutosaveStatus(null);
     setUpdateErrorMessage('');
     setExportErrorMessage('');
     setImportErrorMessage('');
+    setIsExportModalOpen(false);
+    setExportType('DEFAULT');
+  };
+
+  const handleOpenExportModal = () => {
+    if (!activeProcessConfig?.id || isExportingProcessConfig) {
+      return;
+    }
+
+    setExportErrorMessage('');
+    setExportType('DEFAULT');
+    setIsExportModalOpen(true);
+  };
+
+  const handleCloseExportModal = () => {
+    if (isExportingProcessConfig) {
+      return;
+    }
+
+    setIsExportModalOpen(false);
+    setExportErrorMessage('');
+    setExportType('DEFAULT');
   };
 
   const handleExportProcessConfig = async () => {
@@ -4366,7 +4723,7 @@ export function App() {
       setIsExportingProcessConfig(true);
 
       const response = await fetch(
-        `/api/process-configs/${activeProcessConfig.id}/export?scheme=${encodeURIComponent(importScheme)}`,
+        `/api/process-configs/${activeProcessConfig.id}/export?type=${encodeURIComponent(exportType)}`,
       );
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
@@ -4377,6 +4734,7 @@ export function App() {
         `${activeProcessConfig.process?.contextCode?.code || 'process'}.yaml`;
       const blob = await response.blob();
       downloadBlob(blob, filename);
+      handleCloseExportModal();
     } catch (requestError) {
       setExportErrorMessage(getErrorMessage(requestError, 'Не удалось скачать YAML-конфигурацию процесса.'));
     } finally {
@@ -4411,7 +4769,7 @@ export function App() {
       setSelectedNodeId(null);
       setEditorNodeId(null);
       setViewerNodeId(null);
-      setStageOrderNodeId(null);
+      setOrderNodeId(null);
       setLocalProcessConfig(null);
       setEditorPreview(null);
       setIsEditorOpen(false);
@@ -4441,6 +4799,24 @@ export function App() {
     setImportErrorMessage('');
   };
 
+  const handleOpenJsonLogicPlayground = (title, ruleText) => {
+    setJsonLogicPlaygroundTitle(title);
+    setJsonLogicPlaygroundInput('{}');
+    setJsonLogicPlaygroundRule(formatJsonSnippet(ruleText || '{}'));
+    setJsonLogicPlaygroundResult('');
+    setJsonLogicPlaygroundError('');
+    setIsJsonLogicPlaygroundOpen(true);
+  };
+
+  const handleCloseJsonLogicPlayground = () => {
+    if (isEvaluatingJsonLogic) {
+      return;
+    }
+
+    setIsJsonLogicPlaygroundOpen(false);
+    setJsonLogicPlaygroundError('');
+  };
+
   const handleImportFilesSelected = (files) => {
     setImportErrorMessage('');
     setImportFiles((current) => {
@@ -4456,6 +4832,42 @@ export function App() {
 
   const handleRemoveImportFile = (index) => {
     setImportFiles((current) => current.filter((_, fileIndex) => fileIndex !== index));
+  };
+
+  const handleEvaluateJsonLogic = async () => {
+    try {
+      setJsonLogicPlaygroundError('');
+      setIsEvaluatingJsonLogic(true);
+
+      const parsedData = JSON.parse(jsonLogicPlaygroundInput || '{}');
+      const parsedRule = JSON.parse(jsonLogicPlaygroundRule || '{}');
+
+      const response = await fetch('/api/json-logic/evaluate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          data: parsedData,
+          rule: parsedRule,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || `HTTP ${response.status}`);
+      }
+
+      const payload = await response.json();
+      setJsonLogicPlaygroundResult(stringifyJsonForEditor(payload?.result));
+    } catch (requestError) {
+      setJsonLogicPlaygroundError(
+        getErrorMessage(requestError, 'Не удалось проверить JsonLogic правило.'),
+      );
+      setJsonLogicPlaygroundResult('');
+    } finally {
+      setIsEvaluatingJsonLogic(false);
+    }
   };
 
   const handleImportProcessConfigs = async () => {
@@ -4493,7 +4905,7 @@ export function App() {
         setSelectedNodeId(lastImported.processId ? `process:${lastImported.processId}` : null);
         setEditorNodeId(lastImported.processId ? `process:${lastImported.processId}` : null);
         setViewerNodeId(null);
-        setStageOrderNodeId(null);
+        setOrderNodeId(null);
         setIsEditorOpen(Boolean(lastImported.processId));
       }
 
@@ -4553,6 +4965,62 @@ export function App() {
     }
   };
 
+  const handleReorderReverseOutputs = async (reverseId, nextOutputOrder) => {
+    if (!activeProcessConfig?.process) {
+      return;
+    }
+
+    const nextConfig = {
+      ...activeProcessConfig,
+      process: {
+        ...activeProcessConfig.process,
+        subprocess: (activeProcessConfig.process.subprocess ?? []).map((subprocess) => ({
+          ...subprocess,
+          stages: (subprocess.stages ?? []).map((stage) => ({
+            ...stage,
+            configurator: stage.configurator
+              ? {
+                  ...stage.configurator,
+                  result: (stage.configurator.result ?? []).map((result) => ({
+                    ...result,
+                    reverse: (result.reverse ?? []).map((reverse) => {
+                      if (String(reverse.id) !== reverseId) {
+                        return reverse;
+                      }
+
+                      const reorderedOutputs = nextOutputOrder
+                        .map((outputId) => (reverse.output ?? []).find((output) => String(output.id) === outputId))
+                        .filter(Boolean);
+
+                      return {
+                        ...reverse,
+                        output: reorderedOutputs,
+                      };
+                    }),
+                  })),
+                }
+              : stage.configurator,
+          })),
+        })),
+      },
+    };
+
+    try {
+      setUpdateErrorMessage('');
+      setLocalProcessConfig(nextConfig);
+      await reorderReverseOutputs({
+        variables: {
+          reverseId,
+          outputIds: nextOutputOrder,
+        },
+      });
+      await refetch();
+    } catch (mutationError) {
+      setLocalProcessConfig(serverActiveProcessConfig);
+      setUpdateErrorMessage(getErrorMessage(mutationError, 'Не удалось изменить порядок reverse output.'));
+    }
+  };
+
   return (
     <Page>
       <div className="topology-workspace">
@@ -4594,7 +5062,7 @@ export function App() {
                     </Button>
                     <YamlActionsMenu
                       onImport={handleOpenImportModal}
-                      onExport={handleExportProcessConfig}
+                      onExport={handleOpenExportModal}
                       isImporting={isImportingProcessConfig}
                       isExporting={isExportingProcessConfig}
                       canExport={false}
@@ -4619,13 +5087,14 @@ export function App() {
               onEditNode={handleEditNode}
               onViewNode={handleViewNode}
               onReorderSubprocessNode={handleReorderSubprocessNode}
+              onReorderReverseNode={handleReorderReverseNode}
               onDeleteNode={handleDeleteNode}
               onAddChildNode={handleAddChildNode}
               onAddSubprocess={handleAddSubprocess}
               onCreateProcess={handleCreateProcess}
               onDeleteProcessConfig={handleDeleteProcessConfig}
               onImportProcessConfig={handleOpenImportModal}
-              onExportProcessConfig={handleExportProcessConfig}
+              onExportProcessConfig={handleOpenExportModal}
               onSelectProcessConfig={handleSelectProcessConfig}
               onToggleFullscreen={handleToggleTopologyFullscreen}
               isFullscreen={isTopologyFullscreen}
@@ -4679,6 +5148,7 @@ export function App() {
                 onSave={handleSaveNode}
                 onDraftChange={(values) => setEditorPreview(values ? { nodeId: editorNodeId, values } : null)}
                 onAutosaveStatusChange={setAutosaveStatus}
+                onOpenJsonLogicPlayground={handleOpenJsonLogicPlayground}
                 onAddSubprocess={handleAddSubprocess}
                 onBulkCreateResults={handleBulkCreateResults}
                 contextCodeOptions={processCodeOptions}
@@ -4710,29 +5180,36 @@ export function App() {
             </div>
           </aside>
           <div
-            className={stageOrderNodeId ? 'editor-drawer-backdrop editor-drawer-backdrop-open' : 'editor-drawer-backdrop'}
-            onClick={handleCloseStageOrderPanel}
-            aria-hidden={!stageOrderNodeId}
+            className={orderNodeId ? 'editor-drawer-backdrop editor-drawer-backdrop-open' : 'editor-drawer-backdrop'}
+            onClick={handleCloseOrderPanel}
+            aria-hidden={!orderNodeId}
           />
           <aside
-            className={stageOrderNodeId ? 'editor-drawer editor-drawer-open' : 'editor-drawer'}
-            aria-hidden={!stageOrderNodeId}
+            className={orderNodeId ? 'editor-drawer editor-drawer-open' : 'editor-drawer'}
+            aria-hidden={!orderNodeId}
             onClick={(event) => event.stopPropagation()}
           >
             <div className="editor-drawer__header">
               <div className="editor-drawer__header-main">
-                <Title headingLevel="h3">Порядок исполнения стадий</Title>
-                <div className="editor-drawer__status">Перетащите stage. После отпускания порядок сохранится сразу.</div>
+                <Title headingLevel="h3">
+                  {orderNodeId?.startsWith('reverse:') ? 'Порядок reverse output' : 'Порядок исполнения стадий'}
+                </Title>
+                <div className="editor-drawer__status">
+                  {orderNodeId?.startsWith('reverse:')
+                    ? 'Перетащите reverse output. После отпускания порядок сохранится сразу.'
+                    : 'Перетащите stage. После отпускания порядок сохранится сразу.'}
+                </div>
               </div>
-              <Button variant="plain" onClick={handleCloseStageOrderPanel} aria-label="Закрыть панель порядка стадий">
+              <Button variant="plain" onClick={handleCloseOrderPanel} aria-label="Закрыть панель порядка">
                 <XClose aria-hidden className="editor-drawer__close-icon" size={16} />
               </Button>
             </div>
             <div className="editor-drawer__body">
-              <StageOrderEditor
+              <NodeOrderEditor
                 processConfig={activeProcessConfig}
-                subprocessNodeId={stageOrderNodeId}
+                selectedNodeId={orderNodeId}
                 onReorderStages={handleReorderStages}
+                onReorderReverseOutputs={handleReorderReverseOutputs}
                 isSaving={editorIsSaving}
               />
             </div>
@@ -4748,6 +5225,27 @@ export function App() {
             onSchemeChange={setImportScheme}
             onFilesSelected={handleImportFilesSelected}
             onRemoveFile={handleRemoveImportFile}
+          />
+          <ExportTypeModal
+            isOpen={isExportModalOpen}
+            exportType={exportType}
+            isSubmitting={isExportingProcessConfig}
+            errorMessage={exportErrorMessage}
+            onClose={handleCloseExportModal}
+            onSubmit={handleExportProcessConfig}
+            onExportTypeChange={setExportType}
+          />
+          <JsonLogicPlaygroundModal
+            isOpen={isJsonLogicPlaygroundOpen}
+            title={jsonLogicPlaygroundTitle}
+            inputText={jsonLogicPlaygroundInput}
+            ruleText={jsonLogicPlaygroundRule}
+            resultText={jsonLogicPlaygroundResult}
+            isSubmitting={isEvaluatingJsonLogic}
+            errorMessage={jsonLogicPlaygroundError}
+            onClose={handleCloseJsonLogicPlayground}
+            onInputChange={setJsonLogicPlaygroundInput}
+            onEvaluate={handleEvaluateJsonLogic}
           />
           {toast && <Toast title={toast.title} message={toast.message} variant={toast.variant} onClose={() => setToast(null)} />}
         </div>

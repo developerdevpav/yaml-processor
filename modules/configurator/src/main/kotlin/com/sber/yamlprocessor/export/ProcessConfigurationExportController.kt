@@ -1,7 +1,6 @@
 package com.sber.yamlprocessor.export
 
 import com.sber.yamlprocessor.graphql.ProcessConfigurationExportService
-import com.sber.yamlprocessor.importer.YamlImportScheme
 import org.springframework.http.ContentDisposition
 import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
@@ -20,9 +19,9 @@ class ProcessConfigurationExportController(
     @GetMapping("/{id}/export", produces = ["application/yaml"])
     fun export(
         @PathVariable id: String,
-        @RequestParam(name = "scheme", defaultValue = "NEW") scheme: YamlImportScheme
+        @RequestParam(name = "type", defaultValue = "DEFAULT") type: ProcessConfigurationExportType
     ): ResponseEntity<String> {
-        val exported = exportService.exportProcessConfig(id, scheme)
+        val exported = exportService.exportProcessConfig(id, type)
         return ResponseEntity.ok()
             .contentType(MediaType.parseMediaType("application/yaml"))
             .header(

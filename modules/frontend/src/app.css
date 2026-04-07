@@ -3,9 +3,7 @@
 
 :root {
   color: #101828;
-  background:
-    radial-gradient(circle at top left, rgba(127, 86, 217, 0.08), transparent 22rem),
-    linear-gradient(180deg, #f8fafc 0%, #f4f7fb 58%, #eef2f7 100%);
+  background: linear-gradient(180deg, #f8fafc 0%, #f4f7fb 58%, #eef2f7 100%);
   font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
 }
 
@@ -67,20 +65,15 @@ body {
   overflow: hidden;
   border: 1px solid rgba(16, 24, 40, 0.08);
   border-radius: 1.5rem;
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow:
-    0 1px 2px rgba(16, 24, 40, 0.05),
-    0 20px 38px rgba(16, 24, 40, 0.08);
-  backdrop-filter: blur(18px);
+  background: #ffffff;
+  box-shadow: none;
 }
 
 .topology-stage-fullscreen {
   width: 100%;
   height: 100%;
   padding: 1.5rem;
-  background:
-    radial-gradient(circle at top left, rgba(127, 86, 217, 0.12), transparent 22rem),
-    linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
+  background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
 }
 
 .topology-canvas {
@@ -117,10 +110,17 @@ body {
   width: min(20rem, calc(100vw - 11rem));
 }
 
+.topology-canvas__fullscreen {
+  position: absolute;
+  top: 1.5rem;
+  right: 1.5rem;
+  z-index: 4;
+}
+
 .modal-shell {
   position: fixed;
   inset: 0;
-  z-index: 120;
+  z-index: 320;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -266,6 +266,17 @@ body {
   background: #fef3f2;
   color: #b42318;
   font-size: 0.9rem;
+}
+
+.export-modal__hint {
+  margin-top: 1rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid rgba(16, 24, 40, 0.08);
+  border-radius: 1rem;
+  background: #f8fafc;
+  color: #475467;
+  font-size: 0.92rem;
+  line-height: 1.45;
 }
 
 .topology-empty-state {
@@ -1023,7 +1034,16 @@ body {
   padding: 0.8rem 0.8rem 0;
 }
 
-.json-snippet__fullscreen {
+.json-snippet__toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.json-snippet__action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
   border: 1px solid rgba(16, 24, 40, 0.08);
   border-radius: 999px;
   background: #ffffff;
@@ -1036,7 +1056,7 @@ body {
   transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease;
 }
 
-.json-snippet__fullscreen:hover {
+.json-snippet__action:hover {
   background: #f8fafc;
   border-color: rgba(16, 24, 40, 0.14);
   color: #101828;
@@ -1103,6 +1123,71 @@ body {
 .json-snippet-fullscreen .json-snippet__error {
   padding-left: 1.25rem;
   padding-right: 1.25rem;
+}
+
+.modal-card-playground {
+  width: min(92vw, 120rem);
+  max-width: min(92vw, 120rem);
+}
+
+.jsonlogic-playground {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 15rem minmax(0, 1fr);
+  gap: 1rem;
+  align-items: stretch;
+}
+
+.jsonlogic-playground__panel {
+  min-width: 0;
+}
+
+.jsonlogic-playground__panel-header {
+  display: grid;
+  gap: 0.25rem;
+  margin-bottom: 0.75rem;
+}
+
+.jsonlogic-playground__action {
+  display: grid;
+  align-content: center;
+  justify-items: stretch;
+  gap: 1rem;
+}
+
+.jsonlogic-playground__result {
+  display: grid;
+  gap: 0.5rem;
+  padding: 1rem;
+  border: 1px solid rgba(16, 24, 40, 0.08);
+  border-radius: 1rem;
+  background: #fcfcfd;
+}
+
+.jsonlogic-playground__result-label {
+  color: #344054;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.jsonlogic-playground__result-code {
+  margin: 0;
+  min-height: 8rem;
+  max-height: 18rem;
+  overflow: auto;
+  color: #101828;
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 0.8rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.jsonlogic-playground__error {
+  margin: 0;
+  color: #d92d20;
+  font-size: 0.82rem;
+  font-weight: 600;
+  line-height: 1.5;
 }
 
 .editor-drawer-backdrop {
@@ -1224,6 +1309,24 @@ body {
 
   .topology-toolbar__select {
     width: 100%;
+  }
+
+  .topology-canvas__fullscreen {
+    top: 1rem;
+    right: 1rem;
+  }
+
+  .modal-card-playground {
+    width: min(96vw, 120rem);
+    max-width: min(96vw, 120rem);
+  }
+
+  .jsonlogic-playground {
+    grid-template-columns: 1fr;
+  }
+
+  .jsonlogic-playground__action {
+    justify-items: stretch;
   }
 
   .editor-drawer {

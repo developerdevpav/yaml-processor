@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory
 import com.fasterxml.jackson.databind.node.ArrayNode
 import com.fasterxml.jackson.databind.node.ObjectNode
 import com.fasterxml.jackson.dataformat.yaml.YAMLMapper
-import com.sber.yamlprocessor.importer.YamlImportScheme
+import com.sber.yamlprocessor.export.ProcessConfigurationExportType
 import com.sber.yamlprocessor.model.ContextCodesDictionary
 import com.sber.yamlprocessor.model.ProcessConfig
 import com.sber.yamlprocessor.model.Process
@@ -56,6 +56,7 @@ import java.util.Collections
 import java.util.IdentityHashMap
 import java.util.LinkedHashMap
 import java.util.UUID
+import kotlin.reflect.jvm.kotlinProperty
 
 @Configuration
 class JpaGraphQlConfiguration {
@@ -108,6 +109,7 @@ class JpaGraphQlSchemaFactory(
                 "  deleteResultNode(id: ID!): Boolean!",
                 "  createReverseNode(resultId: ID!, input: ReverseInput!): Reverse!",
                 "  updateReverseNode(id: ID!, input: ReverseInput!): Reverse!",
+                "  reorderReverseOutputs(reverseId: ID!, outputIds: [ID!]!): Reverse!",
                 "  deleteReverseNode(id: ID!): Boolean!",
                 "  createReverseOutputNode(reverseId: ID!, input: ReverseOutputInput!): ReverseOutput!",
                 "  updateReverseOutputNode(id: ID!, input: ReverseOutputInput!): ReverseOutput!",
@@ -262,6 +264,12 @@ class JpaGraphQlRuntimeWiringConfigurer(
             type.dataFetcher("updateReverseNode") { env ->
                 @Suppress("UNCHECKED_CAST")
                 service.updateReverseNode(env.getArgument("id"), env.getArgument<Map<String, Any?>>("input"))
+            }
+            type.dataFetcher("reorderReverseOutputs") { env ->
+                service.reorderReverseOutputs(
+                    env.getArgument("reverseId"),
+                    env.getArgument<List<Any?>>("outputIds")
+                )
             }
             type.dataFetcher("deleteReverseNode") { env ->
                 service.deleteReverseNode(env.getArgument("id"))
@@ -493,6 +501,37 @@ class JpaGraphQlCrudService(
         val stageById = currentStages.associateBy { it.id }
         requestedStageIds.forEachIndexed { index, stageId ->
             current.stages[index] = stageById.getValue(stageId)
+        }
+
+        entityManager.flush()
+        initializeGraph(current, entity)
+        return current
+    }
+
+    @Transactional
+    fun reorderReverseOutputs(reverseId: Any?, outputIds: List<Any?>): Reverse {
+        val entity = registry.entity(Reverse::class.java)
+        val entityId = convertId(reverseId, entity.idJavaType)
+        val current = entityManager.find(Reverse::class.java, entityId)
+            ?: error("Reverse with id=$entityId not found")
+
+        val currentOutputs = current.output.toList()
+        val currentOutputIds = currentOutputs.mapNotNull { it.id }
+        val requestedOutputIds = outputIds.map { convertId(it, UUID::class.java) as UUID }
+
+        require(requestedOutputIds.size == currentOutputs.size) {
+            "Expected ${currentOutputs.size} output ids for reverse $entityId, got ${requestedOutputIds.size}"
+        }
+        require(requestedOutputIds.distinct().size == requestedOutputIds.size) {
+            "Output ids for reverse $entityId must be unique"
+        }
+        require(currentOutputIds.toSet() == requestedOutputIds.toSet()) {
+            "Output ids do not match reverse $entityId current outputs"
+        }
+
+        val outputById = currentOutputs.associateBy { it.id }
+        requestedOutputIds.forEachIndexed { index, outputId ->
+            current.output[index] = outputById.getValue(outputId)
         }
 
         entityManager.flush()
@@ -807,6 +846,15 @@ class JpaGraphQlCrudService(
 
         type.fields.forEach { field ->
             val current = getFieldValue(value, field.name) ?: return@forEach
+            if (field.kind == FieldKind.SCALAR &&
+                field.targetClass == String::class.java &&
+                current is String &&
+                current.isBlank() &&
+                isNullableStringField(value.javaClass, field.name)
+            ) {
+                setFieldValue(value, field.name, null)
+                return@forEach
+            }
             when (field.kind) {
                 FieldKind.SCALAR, FieldKind.SCALAR_COLLECTION -> Unit
                 FieldKind.EMBEDDED -> sanitize(current, registry.complexType(field.targetClass))
@@ -1008,6 +1056,9 @@ class JpaGraphQlCrudService(
     private fun safeJson(value: Any?): String =
         runCatching { objectMapper.writeValueAsString(value) }
             .getOrElse { "<unserializable: ${it.javaClass.simpleName}>" }
+
+    private fun isNullableStringField(javaType: Class<*>, fieldName: String): Boolean =
+        findField(javaType, fieldName).kotlinProperty?.returnType?.isMarkedNullable == true
 }
 
 data class ProcessConfigurationExport(
@@ -1030,14 +1081,17 @@ class ProcessConfigurationExportService(
     })
 
     @Transactional(readOnly = true)
-    fun exportProcessConfig(id: Any?, scheme: YamlImportScheme = YamlImportScheme.NEW): ProcessConfigurationExport {
+    fun exportProcessConfig(
+        id: Any?,
+        type: ProcessConfigurationExportType = ProcessConfigurationExportType.DEFAULT
+    ): ProcessConfigurationExport {
         val processConfig = crudService.findProcessConfigForExport(id)
         val process = processConfig.process ?: error("ProcessConfig ${processConfig.id} does not contain process")
         val yamlTree = objectMapper.valueToTree<ObjectNode>(process).deepCopy()
         stripTechnicalFields(yamlTree)
-        val exportTree = when (scheme) {
-            YamlImportScheme.NEW -> yamlTree
-            YamlImportScheme.LEGACY -> wrapLegacyProcess(transformToLegacyTree(yamlTree))
+        val exportTree = when (type) {
+            ProcessConfigurationExportType.DEFAULT -> yamlTree
+            ProcessConfigurationExportType.LEGACY -> wrapLegacyProcess(transformToLegacyTree(yamlTree))
         }
 
         return ProcessConfigurationExport(
@@ -1093,24 +1147,18 @@ class ProcessConfigurationExportService(
     private fun transformLegacyNode(node: com.fasterxml.jackson.databind.JsonNode?) {
         when (node) {
             is ObjectNode -> {
+                val description = node.get("node_name") ?: node.get("nodeName")
                 node.remove("id")
                 node.remove("node_name")
                 node.remove("nodeName")
+                node.remove("node_comment")
                 renameField(node, "duration_value", "durationValue")
                 renameField(node, "duration_unit", "durationUnit")
-                if (node.has("node_comment")) {
-                    val description = node.get("node_comment")
-                    node.remove("node_comment")
-                    if (description != null && !description.isNull) {
-                        node.set<com.fasterxml.jackson.databind.JsonNode>("description", description)
-                    }
-                }
                 if (node.has("nodeComment")) {
-                    val description = node.get("nodeComment")
                     node.remove("nodeComment")
-                    if (!node.has("description") && description != null && !description.isNull) {
-                        node.set<com.fasterxml.jackson.databind.JsonNode>("description", description)
-                    }
+                }
+                if (!node.has("description") && description != null && !description.isNull) {
+                    node.set<com.fasterxml.jackson.databind.JsonNode>("description", description)
                 }
                 node.fields().forEachRemaining { (_, value) ->
                     transformLegacyNode(value)
@@ -1141,7 +1189,7 @@ class ProcessConfigurationExportService(
             node.isObject -> LinkedHashMap<String, Any?>().also { map ->
                 node.fields().forEachRemaining { (name, value) ->
                     val yamlValue = asYamlValue(value, name, parentPath + name)
-                    if (yamlValue != null) {
+                    if (yamlValue != null || shouldExportExplicitNull(value)) {
                         map[name] = yamlValue
                     }
                 }
@@ -1149,7 +1197,7 @@ class ProcessConfigurationExportService(
             node.isArray -> node.map { asYamlValue(it, fieldName, parentPath) }
             node.isTextual -> {
                 val text = node.textValue()
-                if (requiresNullForBlank(parentPath, text)) {
+                if (text.trim().isEmpty()) {
                     null
                 } else if (requiresLiteralStyle(fieldName, parentPath)) {
                     LiteralString(text)
@@ -1168,11 +1216,8 @@ class ProcessConfigurationExportService(
             path.takeLast(2) == listOf("trigger", "rule") ||
             path.takeLast(2) == listOf("output", "rule")
 
-    private fun requiresNullForBlank(path: List<String>, value: String): Boolean =
-        value.isEmpty() && (
-            path.takeLast(2) == listOf("service", "type") ||
-                path.takeLast(2) == listOf("service", "status")
-        )
+    private fun shouldExportExplicitNull(node: com.fasterxml.jackson.databind.JsonNode?): Boolean =
+        false
 }
 
 private data class LiteralString(val value: String)

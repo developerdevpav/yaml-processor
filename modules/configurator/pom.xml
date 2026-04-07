@@ -83,6 +83,12 @@
             <artifactId>jackson-dataformat-yaml</artifactId>
         </dependency>
 
+        <dependency>
+            <groupId>io.github.jamsesso</groupId>
+            <artifactId>json-logic-java</artifactId>
+            <version>1.1.0</version>
+        </dependency>
+
         <!-- In-memory DB for local run/tests -->
         <dependency>
             <groupId>com.h2database</groupId>

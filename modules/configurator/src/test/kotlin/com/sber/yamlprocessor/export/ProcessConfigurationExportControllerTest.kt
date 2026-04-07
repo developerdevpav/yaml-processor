@@ -22,7 +22,7 @@ class ProcessConfigurationExportControllerTest {
 
     @Test
     fun `exports process config as yaml file`() {
-        given(exportService.exportProcessConfig("config-1", com.sber.yamlprocessor.importer.YamlImportScheme.NEW))
+        given(exportService.exportProcessConfig("config-1", ProcessConfigurationExportType.DEFAULT))
             .willReturn(
                 ProcessConfigurationExport(
                     filename = "process.yaml",
@@ -44,7 +44,7 @@ class ProcessConfigurationExportControllerTest {
 
     @Test
     fun `exports process config as legacy yaml file`() {
-        given(exportService.exportProcessConfig("config-1", com.sber.yamlprocessor.importer.YamlImportScheme.LEGACY))
+        given(exportService.exportProcessConfig("config-1", ProcessConfigurationExportType.LEGACY))
             .willReturn(
                 ProcessConfigurationExport(
                     filename = "process.yaml",
@@ -52,7 +52,7 @@ class ProcessConfigurationExportControllerTest {
                 )
             )
 
-        mockMvc.get("/api/process-configs/config-1/export?scheme=LEGACY")
+        mockMvc.get("/api/process-configs/config-1/export?type=LEGACY")
             .andExpect {
                 status { isOk() }
                 content { contentType("application/yaml") }

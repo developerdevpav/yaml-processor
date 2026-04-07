@@ -4,9 +4,9 @@ import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.runApplication
 
 @SpringBootApplication
-class DigitalCreditProcessConfigurator
+class Configurator
 
 fun main(args: Array<String>) {
-    runApplication<DigitalCreditProcessConfigurator>(*args)
+    runApplication<Configurator>(*args)
 }
 
