@@ -477,8 +477,46 @@ function JsonSnippetEditor({
   error,
   helperText,
 }) {
+  const containerRef = useRef(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(document.fullscreenElement === containerRef.current);
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    };
+  }, []);
+
+  const toggleFullscreen = async () => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+
+    if (document.fullscreenElement === container) {
+      await document.exitFullscreen();
+      return;
+    }
+
+    await container.requestFullscreen();
+  };
+
   return (
-    <div className="json-snippet">
+    <div ref={containerRef} className={cn('json-snippet', isFullscreen && 'json-snippet-fullscreen')}>
+      <div className="json-snippet__toolbar">
+        <button
+          type="button"
+          className="json-snippet__fullscreen"
+          onClick={toggleFullscreen}
+          aria-label={isFullscreen ? 'Свернуть редактор кода' : 'Развернуть редактор кода на весь экран'}
+        >
+          {isFullscreen ? 'Свернуть' : 'На весь экран'}
+        </button>
+      </div>
       <textarea
         id={id}
         className="json-snippet__textarea"
