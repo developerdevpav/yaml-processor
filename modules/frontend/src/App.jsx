@@ -742,7 +742,12 @@ function JsonLogicPlaygroundModal({
   }
 
   return (
-    <div className="modal-shell" role="dialog" aria-modal="true" aria-labelledby="jsonlogic-playground-title">
+    <div
+      className="modal-shell modal-shell-playground"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="jsonlogic-playground-title"
+    >
       <div className="modal-shell__backdrop" onClick={onClose} />
       <div className="modal-card modal-card-playground">
         <div className="modal-card__header">
@@ -759,7 +764,7 @@ function JsonLogicPlaygroundModal({
         <div className="jsonlogic-playground">
           <div className="jsonlogic-playground__panel">
             <div className="jsonlogic-playground__panel-header">
-              <Title headingLevel="h5">JSON-объект</Title>
+              <Title headingLevel="h5">Json Object</Title>
             </div>
             <JsonSnippetEditor
               id="jsonlogic-playground-input"
@@ -783,8 +788,7 @@ function JsonLogicPlaygroundModal({
 
           <div className="jsonlogic-playground__panel">
             <div className="jsonlogic-playground__panel-header">
-              <Title headingLevel="h5">Текущее правило</Title>
-              <Text component="small">Содержимое будет передано в backend как `rule`.</Text>
+              <Title headingLevel="h5">JsonLogic Rule</Title>
             </div>
             <JsonSnippetEditor
               id="jsonlogic-playground-rule"
@@ -3918,8 +3922,7 @@ export function App() {
 
     return {
       value: item.id,
-      label: `${processName} - ${item.id}`,
-      description: `ID: ${item.id} | Создан: ${formatDateTime(item.createdAt)} | Обновлен: ${formatDateTime(item.updatedAt)}`,
+      label: processName,
     };
   });
   const editorIsSaving =

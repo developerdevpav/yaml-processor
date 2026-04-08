@@ -1126,8 +1126,29 @@ body {
 }
 
 .modal-card-playground {
-  width: min(92vw, 120rem);
-  max-width: min(92vw, 120rem);
+  width: 100%;
+  max-width: none;
+}
+
+.modal-shell-playground {
+  padding: clamp(0.75rem, 2vw, 1.5rem);
+}
+
+.modal-shell-playground .modal-card-playground {
+  width: min(100%, 160rem);
+  height: calc(100vh - (clamp(0.75rem, 2vw, 1.5rem) * 2));
+  padding: clamp(1rem, 1.4vw, 1.5rem);
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-shell-playground .modal-card__header {
+  flex: 0 0 auto;
+}
+
+.modal-shell-playground .jsonlogic-playground {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .jsonlogic-playground {
@@ -1139,6 +1160,9 @@ body {
 
 .jsonlogic-playground__panel {
   min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
 .jsonlogic-playground__panel-header {
@@ -1147,11 +1171,26 @@ body {
   margin-bottom: 0.75rem;
 }
 
+.modal-shell-playground .jsonlogic-playground__panel .json-snippet {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-shell-playground .jsonlogic-playground__panel .json-snippet__textarea {
+  flex: 1 1 auto;
+  min-height: 0;
+  resize: none;
+}
+
 .jsonlogic-playground__action {
   display: grid;
   align-content: center;
   justify-items: stretch;
   gap: 1rem;
+  min-width: 0;
+  min-height: 0;
 }
 
 .jsonlogic-playground__result {
@@ -1316,13 +1355,18 @@ body {
     right: 1rem;
   }
 
-  .modal-card-playground {
-    width: min(96vw, 120rem);
-    max-width: min(96vw, 120rem);
+  .modal-shell-playground {
+    padding: 0.5rem;
+  }
+
+  .modal-shell-playground .modal-card-playground {
+    height: calc(100vh - 1rem);
+    padding: 0.875rem;
   }
 
   .jsonlogic-playground {
     grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr) auto minmax(0, 1fr);
   }
 
   .jsonlogic-playground__action {
