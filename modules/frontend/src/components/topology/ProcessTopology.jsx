@@ -179,6 +179,7 @@ export function ProcessTopology({
   onDeleteProcessConfig,
   onImportProcessConfig,
   onExportProcessConfig,
+  onOpenJsonLogicPlayground,
   onSelectProcessConfig,
   onToggleFullscreen,
   isFullscreen,
@@ -207,6 +208,7 @@ export function ProcessTopology({
               onDeleteProcessConfig={onDeleteProcessConfig}
               onImportProcessConfig={onImportProcessConfig}
               onExportProcessConfig={onExportProcessConfig}
+              onOpenJsonLogicPlayground={onOpenJsonLogicPlayground}
               isDeleting={isDeleting}
               isImporting={isImporting}
               isExporting={isExporting}

@@ -302,6 +302,7 @@ export function JsonLogicPlaygroundModal({
   errorMessage,
   onClose,
   onInputChange,
+  onRuleChange,
   onEvaluate,
 }) {
   useEscapeKey(isOpen, onClose);
@@ -357,10 +358,9 @@ export function JsonLogicPlaygroundModal({
             <JsonSnippetEditor
               id="jsonlogic-playground-rule"
               value={ruleText}
-              onChange={() => {}}
-              onBeautify={() => {}}
-              readOnly
-              helperText="Правило отображается только для чтения и берется из текущей панели."
+              onChange={onRuleChange}
+              onBeautify={() => onRuleChange(formatJsonSnippet(ruleText))}
+              helperText="Укажите JsonLogic правило в формате JSON."
             />
           </div>
         </div>

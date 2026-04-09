@@ -3676,6 +3676,15 @@ export function App() {
     setIsJsonLogicPlaygroundOpen(true);
   };
 
+  const handleOpenStandaloneJsonLogicPlayground = () => {
+    setJsonLogicPlaygroundTitle('Playground JsonLogic');
+    setJsonLogicPlaygroundInput('{}');
+    setJsonLogicPlaygroundRule('{}');
+    setJsonLogicPlaygroundResult('');
+    setJsonLogicPlaygroundError('');
+    setIsJsonLogicPlaygroundOpen(true);
+  };
+
   const handleCloseJsonLogicPlayground = () => {
     if (isEvaluatingJsonLogic) {
       return;
@@ -3963,6 +3972,7 @@ export function App() {
               onDeleteProcessConfig={handleDeleteProcessConfig}
               onImportProcessConfig={handleOpenImportModal}
               onExportProcessConfig={handleOpenExportModal}
+              onOpenJsonLogicPlayground={handleOpenStandaloneJsonLogicPlayground}
               onSelectProcessConfig={handleSelectProcessConfig}
               onToggleFullscreen={handleToggleTopologyFullscreen}
               isFullscreen={isTopologyFullscreen}
@@ -4119,6 +4129,7 @@ export function App() {
             errorMessage={jsonLogicPlaygroundError}
             onClose={handleCloseJsonLogicPlayground}
             onInputChange={setJsonLogicPlaygroundInput}
+            onRuleChange={setJsonLogicPlaygroundRule}
             onEvaluate={handleEvaluateJsonLogic}
           />
           {toast && <Toast title={toast.title} message={toast.message} variant={toast.variant} onClose={() => setToast(null)} />}

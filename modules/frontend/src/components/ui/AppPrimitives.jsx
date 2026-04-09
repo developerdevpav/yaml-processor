@@ -144,6 +144,7 @@ export function TopologyActionsMenu({
   onDeleteProcessConfig,
   onImportProcessConfig,
   onExportProcessConfig,
+  onOpenJsonLogicPlayground,
   isDeleting = false,
   isImporting = false,
   isExporting = false,
@@ -186,6 +187,12 @@ export function TopologyActionsMenu({
             className="cursor-pointer rounded-lg px-3 py-2 text-sm text-slate-700 outline-none transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Экспортировать YAML
+          </MenuItem>
+          <MenuItem
+            onAction={onOpenJsonLogicPlayground}
+            className="cursor-pointer rounded-lg px-3 py-2 text-sm text-slate-700 outline-none transition hover:bg-slate-50"
+          >
+            Playground JsonLogic
           </MenuItem>
           <MenuItem
             onAction={onDeleteProcessConfig}
