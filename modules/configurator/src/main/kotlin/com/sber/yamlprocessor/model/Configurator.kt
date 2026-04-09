@@ -6,6 +6,7 @@ import jakarta.persistence.CascadeType
 import jakarta.persistence.Column
 import jakarta.persistence.Embedded
 import jakarta.persistence.Entity
+import jakarta.persistence.Lob
 import jakarta.persistence.OneToMany
 import jakarta.persistence.OneToOne
 import jakarta.persistence.OrderColumn
@@ -30,7 +31,8 @@ class Configurator(
     @Embedded
     var audit: Audit? = null,
 
-    @Column(name = "filter_event_rule", nullable = false, length = 4000)
+    @Lob
+    @Column(name = "filter_event_rule", nullable = false)
     @field:JsonProperty("filter-event-rule")
     var filterEventRule: String = "",
 

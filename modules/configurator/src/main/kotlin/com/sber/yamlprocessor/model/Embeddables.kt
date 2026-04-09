@@ -11,6 +11,7 @@ import jakarta.persistence.Embeddable
 import jakarta.persistence.Embedded
 import jakarta.persistence.FetchType
 import jakarta.persistence.JoinColumn
+import jakarta.persistence.Lob
 import jakarta.persistence.ManyToOne
 
 @Embeddable
@@ -50,6 +51,7 @@ class EventLog(
 
 @Embeddable
 class Trigger(
+    @Lob
     @Column(name = "trigger_rule")
     var rule: String = ""
 )

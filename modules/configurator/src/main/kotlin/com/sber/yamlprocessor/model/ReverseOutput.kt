@@ -6,6 +6,7 @@ import jakarta.persistence.Embedded
 import jakarta.persistence.Entity
 import jakarta.persistence.FetchType
 import jakarta.persistence.JoinColumn
+import jakarta.persistence.Lob
 import jakarta.persistence.ManyToOne
 import jakarta.persistence.Table
 
@@ -24,7 +25,8 @@ class ReverseOutput(
     @Column(name = "name", length = 2000)
     var name: String? = null,
 
-    @Column(name = "rule", length = 4000)
+    @Lob
+    @Column(name = "rule")
     var rule: String? = null,
 
     @Embedded

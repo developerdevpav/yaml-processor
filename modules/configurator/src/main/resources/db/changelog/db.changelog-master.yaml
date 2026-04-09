@@ -2,3 +2,6 @@ databaseChangeLog:
   - include:
       relativeToChangelogFile: true
       file: changes/initiated.yaml
+  - include:
+      relativeToChangelogFile: true
+      file: changes/003-jsonlogic-rules-unbounded.yaml

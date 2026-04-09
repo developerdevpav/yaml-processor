@@ -1,0 +1,30 @@
+databaseChangeLog:
+  - changeSet:
+      id: 003-jsonlogic-rules-unbounded
+      author: Pavel Talaika
+      changes:
+        - modifyDataType:
+            tableName: subprocess
+            columnName: trigger_rule
+            newDataType: CLOB
+        - modifyDataType:
+            tableName: configurator
+            columnName: filter_event_rule
+            newDataType: CLOB
+        - modifyDataType:
+            tableName: reverse_output
+            columnName: rule
+            newDataType: CLOB
+      rollback:
+        - modifyDataType:
+            tableName: subprocess
+            columnName: trigger_rule
+            newDataType: VARCHAR(4000)
+        - modifyDataType:
+            tableName: configurator
+            columnName: filter_event_rule
+            newDataType: VARCHAR(4000)
+        - modifyDataType:
+            tableName: reverse_output
+            columnName: rule
+            newDataType: VARCHAR(4000)
