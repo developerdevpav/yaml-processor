@@ -111,6 +111,10 @@ const PROCESS_FIELDS = gql`
       journalServiceName
       message
     }
+    parent {
+      include
+      mode
+    }
   }
 
   fragment ReverseFields on Reverse {
@@ -733,6 +737,10 @@ function serializeReverseOutput(output) {
           journalServiceName: '',
           message: '',
         },
+    parent: {
+      include: output.parent?.include ?? false,
+      mode: output.parent?.mode ?? 'SURFACE',
+    },
   };
 }
 
@@ -2488,6 +2496,55 @@ function NodeEditor({
                 </FormGroup>
               </div>
               <div className="stage-editor-subsection">
+                <Title headingLevel="h5">Родительский процесс</Title>
+                <FormGroup label="" fieldId="reverse-output-parent-include">
+                  <Checkbox
+                    id="reverse-output-parent-include"
+                    isChecked={draft.parent?.include ?? false}
+                    onChange={(_, checked) =>
+                      updateReverseOutputDraft((current) => ({
+                        ...current,
+                        parent: {
+                          ...(current.parent ?? {}),
+                          include: checked,
+                          mode: current.parent?.mode ?? 'SURFACE',
+                        },
+                      }))
+                    }
+                    label="Включить установку родительского процесса"
+                  />
+                </FormGroup>
+                <FormGroup label="Источник родительского процесса" fieldId="reverse-output-parent-mode">
+                  <ProcessSelectField
+                    id="reverse-output-parent-mode"
+                    value={draft.parent?.mode ?? 'SURFACE'}
+                    onChange={(mode) =>
+                      updateReverseOutputDraft((current) => ({
+                        ...current,
+                        parent: {
+                          ...(current.parent ?? {}),
+                          include: current.parent?.include ?? false,
+                          mode: mode || 'SURFACE',
+                        },
+                      }))
+                    }
+                    options={[
+                      {
+                        value: 'SURFACE',
+                        label: 'SURFACE',
+                        description: 'Устанавливать из входящего события',
+                      },
+                      {
+                        value: 'DEEP',
+                        label: 'DEEP',
+                        description: 'Устанавливать из родителя входящего события',
+                      },
+                    ]}
+                    placeholder="Выберите источник"
+                  />
+                </FormGroup>
+              </div>
+              <div className="stage-editor-subsection">
                 <Title headingLevel="h5">Настройки интеграционного журналирования</Title>
                 <FormGroup label="Название сервиса" fieldId="reverse-output-log-journal">
                   <TextInput
@@ -3401,6 +3458,10 @@ export function App() {
               rule: '',
               body: null,
               log: null,
+              parent: {
+                include: false,
+                mode: 'SURFACE',
+              },
             }),
           },
         });

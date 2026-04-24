@@ -92,6 +92,11 @@ export function NodeViewer({ processConfig, selectedNodeId, findSelectedNode, fo
               <StaticField label="B3Event.body.service.slaState.status" value={node.body?.service?.sla?.status?.code || '—'} />
             </div>
             <div className="viewer-section">
+              <Title headingLevel="h5">Родительский процесс</Title>
+              <StaticField label="Включить установку" value={node.parent?.include ? 'Да' : 'Нет'} />
+              <StaticField label="Источник" value={node.parent?.mode || 'SURFACE'} />
+            </div>
+            <div className="viewer-section">
               <Title headingLevel="h5">Настройки интеграционного журналирования</Title>
               <StaticField label="Название сервиса" value={node.log?.journalServiceName || '—'} />
               <StaticField label="Сообщение" value={node.log?.message || '—'} />
