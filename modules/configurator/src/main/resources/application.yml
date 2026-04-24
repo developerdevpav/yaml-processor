@@ -33,6 +33,21 @@ spring:
     graphiql:
       enabled: false
 
+  ai:
+    mcp:
+      server:
+        protocol: STREAMABLE
+        name: yaml-processor
+        version: 1.0.0
+        type: SYNC
+        capabilities:
+          tool: true
+          resource: false
+          prompt: false
+          completion: false
+        streamable-http:
+          mcp-endpoint: /mcp
+
 # Настройки приложения
 app:
   yaml:

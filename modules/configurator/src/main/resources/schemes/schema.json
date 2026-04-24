@@ -230,10 +230,31 @@
         },
         "log": {
           "$ref": "#/definitions/EventLog"
+        },
+        "parent": {
+          "$ref": "#/definitions/Parent"
         }
       },
       "required": [
         "phase"
+      ]
+    },
+    "Parent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "include": {
+          "type": "boolean"
+        },
+        "mode": {
+          "$ref": "#/definitions/ParentMode"
+        }
+      }
+    },
+    "ParentMode": {
+      "enum": [
+        "SURFACE",
+        "DEEP"
       ]
     },
     "Body": {

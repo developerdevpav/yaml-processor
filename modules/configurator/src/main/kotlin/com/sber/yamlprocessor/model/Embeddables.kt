@@ -9,6 +9,8 @@ import jakarta.persistence.AttributeOverrides
 import jakarta.persistence.Column
 import jakarta.persistence.Embeddable
 import jakarta.persistence.Embedded
+import jakarta.persistence.EnumType
+import jakarta.persistence.Enumerated
 import jakarta.persistence.FetchType
 import jakarta.persistence.JoinColumn
 import jakarta.persistence.Lob
@@ -47,6 +49,21 @@ class EventLog(
 
     @Column(name = "rev_out_message")
     var message: String? = null
+)
+
+enum class ParentMode {
+    SURFACE,
+    DEEP
+}
+
+@Embeddable
+class Parent(
+    @Column(name = "parent_include")
+    var include: Boolean? = true,
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "parent_mode", length = 16)
+    var mode: ParentMode? = null
 )
 
 @Embeddable

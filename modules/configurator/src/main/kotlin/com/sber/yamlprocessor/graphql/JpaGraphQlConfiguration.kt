@@ -4,7 +4,6 @@ import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.core.io.ByteArrayResource
 import org.springframework.graphql.execution.GraphQlSource
-import org.springframework.graphql.execution.RuntimeWiringConfigurer
 import java.nio.charset.StandardCharsets
 
 @Configuration
@@ -12,7 +11,7 @@ class JpaGraphQlConfiguration {
     @Bean
     fun jpaGraphQlSource(
         schemaFactory: JpaGraphQlSchemaFactory,
-        runtimeWiringConfigurer: RuntimeWiringConfigurer
+        runtimeWiringConfigurer: JpaGraphQlRuntimeWiringConfigurer
     ): GraphQlSource {
         val schema = schemaFactory.render()
         return GraphQlSource.schemaResourceBuilder()

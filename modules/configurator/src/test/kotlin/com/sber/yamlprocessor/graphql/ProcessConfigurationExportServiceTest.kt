@@ -11,6 +11,8 @@ import com.sber.yamlprocessor.model.Reverse
 import com.sber.yamlprocessor.model.ReverseOutput
 import com.sber.yamlprocessor.model.Body
 import com.sber.yamlprocessor.model.EventLog
+import com.sber.yamlprocessor.model.Parent
+import com.sber.yamlprocessor.model.ParentMode
 import com.sber.yamlprocessor.model.Service
 import com.sber.yamlprocessor.model.SlaState
 import com.sber.yamlprocessor.model.SlaDurationUnitDictionary
@@ -47,7 +49,8 @@ class ProcessConfigurationExportServiceTest {
                 ),
                 type = "SERVICE"
             ),
-            log = EventLog(journalServiceName = "")
+            log = EventLog(journalServiceName = ""),
+            parent = Parent(include = true, mode = ParentMode.SURFACE)
         )
         val reverse = Reverse(output = mutableListOf(output))
         output.reverse = reverse
@@ -101,6 +104,9 @@ class ProcessConfigurationExportServiceTest {
         assertTrue(exported.content.contains("type: SERVICE"), exported.content)
         assertTrue(exported.content.contains("duration_value: 15"), exported.content)
         assertTrue(exported.content.contains("duration_unit: MINUTES"), exported.content)
+        assertTrue(exported.content.contains("parent:"), exported.content)
+        assertTrue(exported.content.contains("include: true"), exported.content)
+        assertTrue(exported.content.contains("mode: SURFACE"), exported.content)
         assertFalse(exported.content.contains("type: null"), exported.content)
         assertFalse(exported.content.contains("journal-service-name: null"), exported.content)
         assertFalse(exported.content.contains("status: null"), exported.content)

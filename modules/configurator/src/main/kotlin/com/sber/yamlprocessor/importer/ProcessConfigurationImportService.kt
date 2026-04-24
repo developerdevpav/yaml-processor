@@ -14,6 +14,8 @@ import com.sber.yamlprocessor.model.ContextCodesDictionary
 import com.sber.yamlprocessor.model.EventLog
 import com.sber.yamlprocessor.model.EventObject
 import com.sber.yamlprocessor.model.Log
+import com.sber.yamlprocessor.model.Parent
+import com.sber.yamlprocessor.model.ParentMode
 import com.sber.yamlprocessor.model.Process
 import com.sber.yamlprocessor.model.ProcessConfig
 import com.sber.yamlprocessor.model.Result
@@ -184,7 +186,8 @@ class ProcessConfigurationImportService(
             name = name.normalizedOrNull(),
             rule = rule.normalizedOrNull(),
             body = body?.toEntity() ?: Body(),
-            log = log?.toEntity() ?: EventLog()
+            log = log?.toEntity() ?: EventLog(),
+            parent = parent?.toEntity()
         )
 
     private fun ImportedLogDefinition.toEntity(): Log =
@@ -208,6 +211,12 @@ class ProcessConfigurationImportService(
             eventObject = eventObject?.toEntity(),
             service = service?.toEntity(),
             type = type.normalizedOrNull()
+        )
+
+    private fun ImportedParentDefinition.toEntity(): Parent =
+        Parent(
+            include = include,
+            mode = mode
         )
 
     private fun ImportedEventObjectDefinition.toEntity(): EventObject =
@@ -323,7 +332,14 @@ data class ImportedReverseOutputDefinition(
     val name: String? = null,
     val rule: String? = null,
     val body: ImportedBodyDefinition? = null,
-    val log: ImportedEventLogDefinition? = null
+    val log: ImportedEventLogDefinition? = null,
+    val parent: ImportedParentDefinition? = null
+)
+
+@JsonIgnoreProperties(ignoreUnknown = false)
+data class ImportedParentDefinition(
+    val include: Boolean? = null,
+    val mode: ParentMode? = null
 )
 
 @JsonIgnoreProperties(ignoreUnknown = false)

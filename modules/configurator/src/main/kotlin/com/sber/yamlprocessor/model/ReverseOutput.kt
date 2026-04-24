@@ -33,5 +33,8 @@ class ReverseOutput(
     var body: Body = Body(),
 
     @Embedded
-    var log: EventLog = EventLog()
+    var log: EventLog = EventLog(),
+
+    @Embedded
+    var parent: Parent? = null
 ) : BaseEntity()

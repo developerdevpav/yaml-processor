@@ -1,0 +1,21 @@
+databaseChangeLog:
+  - changeSet:
+      id: 004-reverse-output-parent
+      author: Pavel Talaika
+      changes:
+        - addColumn:
+            tableName: reverse_output
+            columns:
+              - column:
+                  name: parent_include
+                  type: BOOLEAN
+              - column:
+                  name: parent_mode
+                  type: VARCHAR(16)
+      rollback:
+        - dropColumn:
+            tableName: reverse_output
+            columnName: parent_include
+        - dropColumn:
+            tableName: reverse_output
+            columnName: parent_mode

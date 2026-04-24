@@ -1,6 +1,7 @@
 package com.sber.yamlprocessor.importer
 
 import jakarta.persistence.EntityManager
+import com.sber.yamlprocessor.model.ParentMode
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Test
@@ -58,6 +59,9 @@ class ProcessConfigurationImportServiceTest {
                                         scenario: scenario_a
                                     log:
                                       journal-service-name: journal-service
+                                    parent:
+                                      include: true
+                                      mode: SURFACE
             """.trimIndent().toByteArray()
         )
 
@@ -75,6 +79,10 @@ class ProcessConfigurationImportServiceTest {
         assertEquals("subprocess comment", processConfig.process?.subprocess?.single()?.nodeComment)
         assertEquals("stage_alpha", processConfig.process?.subprocess?.single()?.stages?.single()?.nodeName)
         assertEquals("stage comment", processConfig.process?.subprocess?.single()?.stages?.single()?.nodeComment)
+        val output = processConfig.process?.subprocess?.single()?.stages?.single()?.configurator
+            ?.result?.single()?.reverse?.single()?.output?.single()
+        assertEquals(true, output?.parent?.include)
+        assertEquals(ParentMode.SURFACE, output?.parent?.mode)
     }
 
     @Test

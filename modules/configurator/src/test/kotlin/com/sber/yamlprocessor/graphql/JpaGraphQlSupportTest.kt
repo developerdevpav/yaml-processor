@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.sber.yamlprocessor.model.ActionPhasesDictionary
 import com.sber.yamlprocessor.model.B3StatusDictionary
 import com.sber.yamlprocessor.model.ContextCodesDictionary
+import com.sber.yamlprocessor.model.ParentMode
 import com.sber.yamlprocessor.model.Process
 import com.sber.yamlprocessor.model.ProcessConfig
 import com.sber.yamlprocessor.model.Configurator
@@ -71,6 +72,8 @@ class JpaGraphQlSupportTest {
         assertTrue(schema.mutationType.fieldDefinitions.any { it.name == "createReverseOutputNode" })
         assertTrue(schema.mutationType.fieldDefinitions.any { it.name == "updateReverseOutputNode" })
         assertTrue(schema.mutationType.fieldDefinitions.any { it.name == "deleteReverseOutputNode" })
+        assertNotNull(schema.getType("Parent"))
+        assertNotNull(schema.getType("ParentInput"))
     }
 
     @Test
@@ -102,6 +105,10 @@ class JpaGraphQlSupportTest {
                 "log" to mapOf(
                     "journalServiceName" to "journal-name",
                     "message" to "log-message"
+                ),
+                "parent" to mapOf(
+                    "include" to true,
+                    "mode" to "SURFACE"
                 )
             ),
             ReverseOutput::class.java
@@ -114,6 +121,8 @@ class JpaGraphQlSupportTest {
         assertEquals("RUNNING", output.body.service?.status?.code)
         assertEquals("journal-name", output.log.journalServiceName)
         assertEquals("log-message", output.log.message)
+        assertEquals(true, output.parent?.include)
+        assertEquals(ParentMode.SURFACE, output.parent?.mode)
     }
 
     @Test
@@ -123,12 +132,14 @@ class JpaGraphQlSupportTest {
         val stageContextCodeField = registry.entity(Stage::class.java).fields.first { it.name == "contextCode" }
         val serviceStatusField = registry.complexType(Service::class.java).fields.first { it.name == "status" }
         val slaStatusField = registry.complexType(com.sber.yamlprocessor.model.SlaState::class.java).fields.first { it.name == "status" }
+        val parentModeField = registry.complexType(com.sber.yamlprocessor.model.Parent::class.java).fields.first { it.name == "mode" }
 
         assertEquals(B3StatusDictionary::class.java, reverseStatusField.targetClass)
         assertEquals(ActionPhasesDictionary::class.java, reverseOutputPhaseField.targetClass)
         assertEquals(ContextCodesDictionary::class.java, stageContextCodeField.targetClass)
         assertEquals(B3StatusDictionary::class.java, serviceStatusField.targetClass)
         assertEquals(SlaStatusDictionary::class.java, slaStatusField.targetClass)
+        assertEquals(ParentMode::class.java, parentModeField.targetClass)
     }
 
     @Test
@@ -164,6 +175,10 @@ class JpaGraphQlSupportTest {
                         )
                     ),
                     "type" to "SERVICE"
+                ),
+                "parent" to mapOf(
+                    "include" to true,
+                    "mode" to "DEEP"
                 )
             )
         )
@@ -173,14 +188,18 @@ class JpaGraphQlSupportTest {
 
         val persisted = entityManager.find(ReverseOutput::class.java, created.id)
         assertEquals(15, persisted.body.service?.sla?.durationValue)
+        assertEquals(true, persisted.parent?.include)
+        assertEquals(ParentMode.DEEP, persisted.parent?.mode)
 
-        val rawValue = entityManager.createNativeQuery(
-            "select body_service_sla_duration_value from reverse_output where id = :id"
+        val rawValues = entityManager.createNativeQuery(
+            "select body_service_sla_duration_value, parent_include, parent_mode from reverse_output where id = :id"
         )
             .setParameter("id", created.id)
-            .singleResult as Number?
+            .singleResult as Array<*>
 
-        assertEquals(15, rawValue?.toInt())
+        assertEquals(15, (rawValues[0] as Number).toInt())
+        assertEquals(true, rawValues[1] as Boolean)
+        assertEquals("DEEP", rawValues[2])
     }
 
     @Test

@@ -5,3 +5,6 @@ databaseChangeLog:
   - include:
       relativeToChangelogFile: true
       file: changes/003-jsonlogic-rules-unbounded.yaml
+  - include:
+      relativeToChangelogFile: true
+      file: changes/004-reverse-output-parent.yaml

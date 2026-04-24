@@ -3,7 +3,6 @@ package com.sber.yamlprocessor.graphql
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.sber.yamlprocessor.model.Configurator
 import com.sber.yamlprocessor.model.ContextCodesDictionary
-import com.sber.yamlprocessor.model.DictionaryEntity
 import com.sber.yamlprocessor.model.Process
 import com.sber.yamlprocessor.model.ProcessConfig
 import com.sber.yamlprocessor.model.Result
@@ -589,18 +588,17 @@ class JpaGraphQlCrudService(
                     val referenceField = findField(value.javaClass, field.name)
                     val referenceJavaType = referenceField.type
                     val target = registry.entity(referenceJavaType)
-                    val refId = getFieldValue(current, target.idField.name)
+                    val refId = referenceIdentifier(current, target)
                     if (refId == null) {
                         if (isInMemoryBackReference(current, value, target)) {
                             return@forEach
                         }
                         error("Reference ${field.name} must include ${target.idField.name}")
                     }
-                    val normalizedReference = if (DictionaryEntity::class.java.isAssignableFrom(referenceJavaType)) {
-                        instantiateDictionaryReference(referenceJavaType, refId)
-                    } else {
-                        instantiateReference(target, convertId(refId, target.idJavaType))
-                    }
+                    val normalizedReference = entityManager.getReference(
+                        referenceJavaType,
+                        convertId(refId, target.idJavaType)
+                    )
                     setFieldValue(value, field.name, normalizedReference)
                 }
                 FieldKind.ENTITY_CHILD -> {
@@ -643,11 +641,10 @@ class JpaGraphQlCrudService(
                     val referenceJavaType = referenceField.type
                     val target = registry.entity(referenceJavaType)
                     val refId = refInput[target.idField.name] ?: return@forEach
-                    val normalizedReference = if (DictionaryEntity::class.java.isAssignableFrom(referenceJavaType)) {
-                        instantiateDictionaryReference(referenceJavaType, refId)
-                    } else {
-                        instantiateReference(target, convertId(refId, target.idJavaType))
-                    }
+                    val normalizedReference = entityManager.getReference(
+                        referenceJavaType,
+                        convertId(refId, target.idJavaType)
+                    )
                     setFieldValue(value, field.name, normalizedReference)
                 }
                 FieldKind.ENTITY_CHILD -> {
@@ -668,6 +665,11 @@ class JpaGraphQlCrudService(
             }
         }
     }
+
+    private fun referenceIdentifier(reference: Any, target: EntityMetadata): Any? =
+        runCatching { entityManager.entityManagerFactory.persistenceUnitUtil.getIdentifier(reference) }
+            .getOrNull()
+            ?: getFieldValue(reference, target.idField.name)
 
     private fun isInMemoryBackReference(reference: Any, owner: Any, target: EntityMetadata): Boolean =
         target.fields
