@@ -1,35 +1,35 @@
 ---
 name: yaml-processor-process-management
-description: Use this skill when an LLM needs to create, edit, search, validate, import, export, or reason about yaml-processor process configurations through the HTTP MCP server, GraphQL-equivalent tools, YAML schemas, JsonLogic rules, and event validation.
+description: Используйте этот скил, когда LLM нужно создавать, редактировать, искать, валидировать, импортировать, экспортировать или анализировать конфигурации процессов yaml-processor через HTTP MCP сервер, GraphQL-эквивалентные инструменты, YAML-схемы, правила JsonLogic и валидацию событий.
 ---
 
-# YAML Processor Process Management
+# Управление Процессами YAML Processor
 
-Use this skill to control process configuration through the LLM-facing MCP HTTP server.
+Используйте этот скил для управления конфигурацией процессов через MCP HTTP сервер, предназначенный для работы с LLM.
 
-## Core Workflow
+## Основной Рабочий Процесс
 
-1. Discover tools with MCP `tools/list`.
-2. Read or create a `ProcessConfig`.
-3. Build the process tree in this order: `Process -> Subprocess -> Stage -> Configurator -> Result -> Reverse -> ReverseOutput`.
-4. Use JsonLogic rules for event routing:
-   - `subprocess.trigger.rule` decides whether the subprocess starts.
-   - `configurator.filter-event-rule` filters events at the stage.
-   - `reverse.output.rule` decides whether a response event is emitted.
-5. Validate an incoming event with MCP tool `validateEvent` before saving or deploying a configuration.
-6. Export YAML when a human-readable artifact is needed.
+1. Получите список инструментов через MCP `tools/list`.
+2. Прочитайте или создайте `ProcessConfig`.
+3. Собирайте дерево процесса в таком порядке: `Process -> Subprocess -> Stage -> Configurator -> Result -> Reverse -> ReverseOutput`.
+4. Используйте правила JsonLogic для маршрутизации событий:
+   - `subprocess.trigger.rule` определяет, должен ли запуститься подпроцесс.
+   - `configurator.filter-event-rule` фильтрует события на стадии.
+   - `reverse.output.rule` определяет, нужно ли отправить ответное событие.
+5. Перед сохранением или внедрением конфигурации провалидируйте входящее событие MCP-инструментом `validateEvent`.
+6. Экспортируйте YAML, когда нужен человекочитаемый артефакт.
 
-## MCP Endpoint
+## MCP-Точка Входа
 
 HTTP endpoint: `POST /mcp`
 
-MCP methods:
+MCP-методы:
 
-- `initialize` - returns server metadata.
-- `tools/list` - lists GraphQL-equivalent CRUD tools and custom node tools.
-- `tools/call` - calls one tool with `params.name` and `params.arguments`.
+- `initialize` - возвращает метаданные сервера.
+- `tools/list` - выводит GraphQL-эквивалентные CRUD-инструменты и кастомные node-инструменты.
+- `tools/call` - вызывает один инструмент по `params.name` и `params.arguments`.
 
-Important custom tools:
+Важные кастомные инструменты:
 
 - `createSubprocessNode`, `updateSubprocessNode`, `deleteSubprocessNode`
 - `createStageNode`, `updateStageNode`, `deleteStageNode`
@@ -41,19 +41,19 @@ Important custom tools:
 - `validateEvent`
 - `searchProcesses`
 
-## Configuration Model
+## Модель Конфигурации
 
-- `process` is the root business process. `context-code` limits it to a business context, `disabled` disables the process, `node_name` and `node_comment` are operator-facing labels.
-- `subprocess` groups stages and has `trigger.rule`, a JsonLogic rule evaluated against the incoming event.
-- `stage` defines one executor step. `executor` is the service or handler name. `log.journal-service-name` configures integration journal logging.
-- `configurator` defines filtering and response rules for a stage. `filter-event-rule` is JsonLogic. `interrupted` and `multiple` control process behavior. `audit` describes audit emission.
-- `result.input-scenarios` lists incoming `b3event.body.service.scenario` values or glob patterns. `*` matches any sequence, `?` matches one character.
-- `reverse.status` is the B3 status branch for responses.
-- `reverse.output` describes response events. `phase` is the output phase, `rule` is JsonLogic, `body` describes the response event body, `log` configures event log output.
-- `reverse.output.parent.include` enables parent formation for that response event.
-- `reverse.output.parent.mode` controls where parent data comes from: `SURFACE` uses parent data from the incoming event; `DEEP` uses parent data from the incoming event's `parentProcess`.
+- `process` - корневой бизнес-процесс. `context-code` ограничивает его бизнес-контекстом, `disabled` отключает процесс, `node_name` и `node_comment` являются названиями и комментариями для оператора.
+- `subprocess` группирует стадии и содержит `trigger.rule`, правило JsonLogic, которое вычисляется на входящем событии.
+- `stage` описывает один шаг исполнителя. `executor` - имя сервиса или обработчика. `log.journal-service-name` настраивает запись в интеграционный журнал.
+- `configurator` задает фильтрацию и правила ответов для стадии. `filter-event-rule` - JsonLogic. `interrupted` и `multiple` управляют поведением процесса. `audit` описывает отправку аудита.
+- `result.input-scenarios` перечисляет значения входящего `b3event.body.service.scenario` или glob-паттерны. `*` соответствует любой последовательности, `?` соответствует одному символу.
+- `reverse.status` - B3 status ветка для ответов.
+- `reverse.output` описывает ответные события. `phase` - фаза исходящего события, `rule` - JsonLogic, `body` описывает тело ответного события, `log` настраивает логирование события.
+- `reverse.output.parent.include` включает формирование родительского процесса для этого ответного события.
+- `reverse.output.parent.mode` управляет источником родительских данных: `SURFACE` берет родительские данные из входящего события; `DEEP` берет родительские данные из `parentProcess` входящего события.
 
-## Minimal YAML Example
+## Минимальный YAML-Пример
 
 ```yaml
 process:
@@ -93,11 +93,11 @@ process:
                           journal-service-name: credit-journal
 ```
 
-JsonLogic values are stored as strings. In YAML, prefer literal blocks (`|-`) containing JSON.
+Значения JsonLogic хранятся как строки. В YAML предпочитайте literal block (`|-`) с JSON внутри.
 
-## Create A Process Through MCP
+## Создание Процесса Через MCP
 
-Call `createProcessConfig` with nested input when creating a whole graph at once:
+При создании всего графа сразу вызывайте `createProcessConfig` с вложенным input:
 
 ```json
 {
@@ -132,7 +132,7 @@ Call `createProcessConfig` with nested input when creating a whole graph at once
 }
 ```
 
-For controlled incremental editing, create a minimal root and then call node tools in order:
+Для контролируемого поэтапного редактирования создайте минимальный root, а затем вызывайте node-инструменты по порядку:
 
 1. `createProcessConfig`
 2. `createSubprocessNode(processId, input)`
@@ -142,13 +142,13 @@ For controlled incremental editing, create a minimal root and then call node too
 6. `createReverseNode(resultId, input)`
 7. `createReverseOutputNode(reverseId, input)`
 
-Use `update...Node` tools for edits and keep IDs stable.
+Для изменений используйте инструменты `update...Node` и сохраняйте ID стабильными.
 
-## Get Processes Through MCP
+## Получение Процессов Через MCP
 
-Use `searchProcesses` when the user asks to show all processes or asks for a process by approximate name.
+Используйте `searchProcesses`, когда пользователь просит показать все процессы или найти процесс по примерному названию.
 
-Return all processes:
+Вернуть все процессы:
 
 ```json
 {
@@ -162,7 +162,7 @@ Return all processes:
 }
 ```
 
-Search by approximate name, description, id, processConfigId, or context code:
+Поиск по примерному названию, описанию, id, processConfigId или context code:
 
 ```json
 {
@@ -178,35 +178,35 @@ Search by approximate name, description, id, processConfigId, or context code:
 }
 ```
 
-Example: if processes are named `ФЖН Цифровой` and `ФЖН Многопродуктовый`, query `ФЖН` must return both. If the user gives an exact UUID, pass it as `query`; if the user gives a rough human name, pass the meaningful fragment.
+Пример: если процессы называются `ФЖН Цифровой` и `ФЖН Многопродуктовый`, запрос `ФЖН` должен вернуть оба. Если пользователь дает точный UUID, передавайте его как `query`; если пользователь дает примерное человеческое название, передавайте значимый фрагмент.
 
-`searchProcesses` returns compact process summaries:
+`searchProcesses` возвращает компактные summary процессов:
 
-- `id` - process id.
-- `processConfigId` - root config id to use with `processConfig` or `validateEvent`.
-- `nodeName` - process display name.
-- `nodeComment` - process description/comment.
-- `contextCode` - context dictionary code.
-- `disabled` - whether the process is disabled.
-- `subprocessCount` - number of subprocesses.
+- `id` - id процесса.
+- `processConfigId` - id корневой конфигурации для использования с `processConfig` или `validateEvent`.
+- `nodeName` - отображаемое имя процесса.
+- `nodeComment` - описание/комментарий процесса.
+- `contextCode` - код справочника контекстов.
+- `disabled` - отключен ли процесс.
+- `subprocessCount` - количество подпроцессов.
 
-When the full graph is needed after search, call `processConfig` with the returned `processConfigId`.
+Когда после поиска нужен полный граф, вызовите `processConfig` с возвращенным `processConfigId`.
 
-## Answer Questions About Sent Events In A Stage
+## Ответы На Вопросы Об Отправляемых Событиях В Стадии
 
-Use this workflow when the user asks something like:
+Используйте этот workflow, когда пользователь спрашивает что-то вроде:
 
 `Какие события отправляются в стадии Структурирование сделки ФЖН Цифровой?`
 
-Interpret the request as:
+Интерпретируйте запрос так:
 
-- process query: `ФЖН Цифровой`
-- stage query: `Структурирование сделки`
-- target: outgoing events configured in `reverse.output` under this stage.
+- запрос процесса: `ФЖН Цифровой`
+- запрос стадии: `Структурирование сделки`
+- цель: исходящие события, настроенные в `reverse.output` внутри этой стадии.
 
-Steps:
+Шаги:
 
-1. Call `searchProcesses` with the process fragment:
+1. Вызовите `searchProcesses` с фрагментом процесса:
 
 ```json
 {
@@ -222,7 +222,7 @@ Steps:
 }
 ```
 
-2. If several processes match, choose the closest by `nodeName`; if ambiguous, show candidates and ask for clarification. If one process matches, call `processConfig` with `processConfigId`:
+2. Если найдено несколько процессов, выберите ближайший по `nodeName`; если неоднозначно, покажите кандидатов и попросите уточнение. Если найден один процесс, вызовите `processConfig` с `processConfigId`:
 
 ```json
 {
@@ -238,26 +238,26 @@ Steps:
 }
 ```
 
-3. Search inside `process.subprocess[].stages[]` by approximate match against:
+3. Найдите стадию внутри `process.subprocess[].stages[]` примерным совпадением по:
 
 - `stage.nodeName`
 - `stage.nodeComment`
 - `stage.executor`
 
-Use case-insensitive contains matching. For `Структурирование сделки`, a stage named `Структурирование сделки`, `ФЖН. Структурирование`, or executor `deal.structuring` may be relevant; prefer `nodeName` over executor when both match.
+Используйте регистронезависимое contains-сопоставление. Для `Структурирование сделки` могут быть релевантны стадия с названием `Структурирование сделки`, `ФЖН. Структурирование` или executor `deal.structuring`; при совпадении нескольких полей предпочитайте `nodeName`, а не executor.
 
-4. For every matched stage, read:
+4. Для каждой найденной стадии прочитайте:
 
 - `stage.configurator.filterEventRule`
 - `stage.configurator.result[].inputScenarios`
 - `stage.configurator.result[].reverse[].status.code`
 - `stage.configurator.result[].reverse[].output[]`
 
-Each outgoing event is one `reverse.output` item.
+Каждое исходящее событие - это один элемент `reverse.output`.
 
-5. Present the result in a compact but explanatory format.
+5. Представьте результат компактно, но с пояснениями.
 
-Recommended output format:
+Рекомендуемый формат ответа:
 
 ```markdown
 В стадии `<stage nodeName>` процесса `<process nodeName>` настроены такие исходящие события:
@@ -275,7 +275,7 @@ Recommended output format:
      - body.service.type: `<output.body.service.type>`
      - body.service.status: `<output.body.service.status.code>`
      - body.event-object.type: `<output.body.eventObject.type>`
-     - SLA: `<status / duration_value / duration_unit, if present>`
+     - SLA: `<status / duration_value / duration_unit, если есть>`
    - Parent:
      - include: `<true/false/не задан>`
      - mode: `<SURFACE/DEEP/не задан>`
@@ -284,45 +284,45 @@ Recommended output format:
      - message: `<output.log.message>`
 ```
 
-If a value is absent, write `не задано` instead of omitting it when the absence is meaningful. If there are no `reverse.output` items in the stage, say that the stage does not send configured outgoing events.
+Если значение отсутствует, пишите `не задано` вместо того, чтобы пропускать его, когда отсутствие важно. Если в стадии нет элементов `reverse.output`, скажите, что стадия не отправляет настроенных исходящих событий.
 
-## Human-Readable JsonLogic Summaries
+## Человекочитаемые Описания JsonLogic
 
-When explaining rules, do not dump raw JSON only. Give a human-readable summary and include raw JsonLogic only if it is short or the user asks for exact rules.
+Когда объясняете правила, не показывайте только сырой JSON. Дайте человекочитаемое описание и добавляйте исходный JsonLogic только если он короткий или пользователь просит точные правила.
 
-Examples:
+Примеры:
 
 - `{"==":[{"var":"b3event.body.service.scenario"},"x"]}` -> `сценарий входящего события равен x`
 - `{"==":[{"var":"b3event.body.service.status"},"INITIATED"]}` -> `статус входящего service равен INITIATED`
 - `{"and":[A,B]}` -> `выполняются оба условия: ...`
-- blank rule -> `условие не задано, правило не ограничивает отправку`
+- пустое правило -> `условие не задано, правило не ограничивает отправку`
 
-For event-search answers, explain the decision chain:
+В ответах про поиск событий объясняйте цепочку принятия решения:
 
-1. Subprocess trigger decides whether the subprocess starts.
-2. Stage `filter-event-rule` decides whether this stage accepts the incoming event.
-3. `result.input-scenarios` decides which scenario branch is used.
-4. `reverse.status` selects the status branch.
-5. `reverse.output.rule` decides whether a concrete outgoing event is sent.
+1. Subprocess trigger определяет, запускается ли подпроцесс.
+2. Stage `filter-event-rule` определяет, принимает ли эта стадия входящее событие.
+3. `result.input-scenarios` определяет, какая сценарная ветка используется.
+4. `reverse.status` выбирает status-ветку.
+5. `reverse.output.rule` определяет, отправляется ли конкретное исходящее событие.
 
-## Brief Business Explanation Style
+## Краткий Стиль Бизнес-Описания
 
-Use this style when the user asks:
+Используйте этот стиль, когда пользователь спрашивает:
 
 - `Что делает процесс ...?`
 - `Что делает подпроцесс ...?`
 - `Какие отправляются события по процессу ...?`
 - `Какие события отправляются в подпроцессе/стадии ...?`
 
-Goal: explain behavior in business terms, not as raw YAML. Mention exact fields only where they clarify the event contract.
+Цель: объяснить поведение в бизнес-терминах, а не как сырой YAML. Упоминайте точные поля только там, где они поясняют контракт события.
 
-Process-level answer structure:
+Структура ответа на уровне процесса:
 
 ```markdown
 Процесс `<process nodeName>` обрабатывает события в контексте `<contextCode>`.
 
 Кратко:
-<1-3 sentences: what incoming events it accepts and what outgoing events it can send.>
+<1-3 предложения: какие входящие события он принимает и какие исходящие события может отправлять.>
 
 Подпроцессы:
 - `<subprocess nodeName/id>`: запускается, когда `<trigger summary>`.
@@ -331,7 +331,7 @@ Process-level answer structure:
     <short outgoing event list>
 ```
 
-Outgoing event summary format:
+Формат summary исходящего события:
 
 ```markdown
 Если входящее событие имеет сценарий (`event.body.service.scenario`) `<input-scenarios>` и статус (`event.body.service.status`) `<status from output rule or reverse.status>`:
@@ -348,13 +348,13 @@ Outgoing event summary format:
 В интеграционный журнал записываем под `service.name`: `<output.log.journal-service-name>`
 ```
 
-If `output.body.service.status` is absent but the status is present in `reverse.status`, say:
+Если `output.body.service.status` отсутствует, но статус есть в `reverse.status`, скажите:
 
 `Статус ветки reverse: <reverse.status>; в самом отправляемом body status не задан.`
 
-If `output.name` is present, use it as the human output name. If absent, use `output.body.service.scenario`; if both are absent, use `исходящее событие без имени`.
+Если `output.name` задан, используйте его как человеческое имя исходящего события. Если он отсутствует, используйте `output.body.service.scenario`; если оба отсутствуют, используйте `исходящее событие без имени`.
 
-Map common phases to human words:
+Сопоставляйте распространенные фазы с человеческими формулировками:
 
 - `START` -> `стартовое событие`
 - `BUSINESS_COMPLETE` -> `событие бизнес-завершения`
@@ -362,15 +362,15 @@ Map common phases to human words:
 - `COMPLETE_FAILURE` -> `событие ошибки/негативного завершения`
 - `CHANGE_BUSINESS_STAGE` -> `событие смены бизнес-стадии`
 - `CHECK_IN` -> `событие check-in`
-- otherwise use `событие фазы <phase>`
+- иначе используйте `событие фазы <phase>`
 
-When deriving the status condition:
+При выводе условия по статусу:
 
-- Prefer a simple equality in `reverse.output.rule`, for example `event.body.service.status == INITIATED`.
-- If the output rule is blank, say `дополнительное правило отправки не задано`.
-- If the status only comes from `reverse.status`, phrase it as `в ветке reverse со статусом <status>`.
+- Предпочитайте простое равенство в `reverse.output.rule`, например `event.body.service.status == INITIATED`.
+- Если output rule пустой, скажите `дополнительное правило отправки не задано`.
+- Если статус берется только из `reverse.status`, формулируйте это как `в ветке reverse со статусом <status>`.
 
-Example source:
+Пример источника:
 
 ```yaml
 - id: subprocess_credit_start
@@ -406,7 +406,7 @@ Example source:
                       journal-service-name: credit-journal
 ```
 
-Example answer:
+Пример ответа:
 
 ```markdown
 Если входящее событие имеет сценарий (`event.body.service.scenario`) `credit.request.*` и статус (`event.body.service.status`) `INITIATED`:
@@ -425,9 +425,9 @@ Parent будет сформирован из входящего события 
 В интеграционный журнал записываем под `service.name`: `credit-journal`.
 ```
 
-Keep answers short by default. If there are many outputs, group by `input-scenarios`, then by `reverse.status`, then list outgoing events under each group.
+По умолчанию отвечайте кратко. Если исходящих событий много, группируйте их по `input-scenarios`, затем по `reverse.status`, затем перечисляйте исходящие события внутри каждой группы.
 
-## Reverse Output Parent Example
+## Пример Reverse Output Parent
 
 ```json
 {
@@ -447,11 +447,11 @@ Keep answers short by default. If there are many outputs, group by `input-scenar
 }
 ```
 
-Use `SURFACE` when the response must copy parent data directly from the incoming event. Use `DEEP` when the response must use the incoming event's `parentProcess` as the source.
+Используйте `SURFACE`, когда ответ должен копировать родительские данные напрямую из входящего события. Используйте `DEEP`, когда ответ должен использовать `parentProcess` входящего события как источник.
 
-## Search And Validate Events
+## Поиск И Валидация Событий
 
-Use `validateEvent` to find which saved process configuration accepts an event and which reverse outputs are eligible.
+Используйте `validateEvent`, чтобы определить, какая сохраненная конфигурация процесса принимает событие и какие reverse outputs подходят для отправки.
 
 ```json
 {
@@ -479,27 +479,27 @@ Use `validateEvent` to find which saved process configuration accepts an event a
 }
 ```
 
-The response contains:
+Ответ содержит:
 
-- `scenario` - extracted from `b3event.body.service.scenario`.
-- `matched` - true when at least one process path matches.
-- `processConfigs[].process.subprocess[].trigger` - JsonLogic result for subprocess trigger.
-- `stages[].filterEventRule` - JsonLogic result for stage filter.
-- `results[].scenarioMatched` - whether the event scenario matched `input-scenarios`.
-- `reverse[].outputs[].rule` - JsonLogic result for reverse output rule.
-- `reverse[].outputs[].parent` - parent include/mode selected for the response.
+- `scenario` - извлечен из `b3event.body.service.scenario`.
+- `matched` - true, когда совпал хотя бы один путь процесса.
+- `processConfigs[].process.subprocess[].trigger` - результат JsonLogic для subprocess trigger.
+- `stages[].filterEventRule` - результат JsonLogic для stage filter.
+- `results[].scenarioMatched` - совпал ли сценарий события с `input-scenarios`.
+- `reverse[].outputs[].rule` - результат JsonLogic для reverse output rule.
+- `reverse[].outputs[].parent` - выбранные parent include/mode для ответа.
 
-Set `includeNonMatches: true` when debugging why an event did not match. The tool will include failed branches and errors from invalid JsonLogic.
+Устанавливайте `includeNonMatches: true`, когда нужно понять, почему событие не совпало. Инструмент включит неуспешные ветки и ошибки невалидного JsonLogic.
 
-## JsonLogic Examples
+## Примеры JsonLogic
 
-Match event type:
+Совпадение по типу события:
 
 ```json
 { "==": [ { "var": "b3event.type" }, "CREDIT_REQUEST" ] }
 ```
 
-Match scenario and status:
+Совпадение по сценарию и статусу:
 
 ```json
 {
@@ -510,16 +510,16 @@ Match scenario and status:
 }
 ```
 
-Check nested parent data:
+Проверка вложенных родительских данных:
 
 ```json
 { "!=": [ { "var": "b3event.parentProcess.id" }, null ] }
 ```
 
-## Practical Rules For LLMs
+## Практические Правила Для LLM
 
-- Start with a concrete example event, then create `trigger.rule`, `filter-event-rule`, `input-scenarios`, and output `rule` around that event.
-- After each structural change, call `validateEvent` with the intended event.
-- For broad scenario groups, use `input-scenarios` glob patterns such as `credit.request.*`.
-- Keep response `body.service.scenario` explicit; it is the outgoing scenario.
-- Use `parent.include: false` or omit `parent` when the response must not carry parent data.
+- Начинайте с конкретного примера события, затем создавайте вокруг него `trigger.rule`, `filter-event-rule`, `input-scenarios` и output `rule`.
+- После каждого структурного изменения вызывайте `validateEvent` с целевым событием.
+- Для широких групп сценариев используйте glob-паттерны `input-scenarios`, например `credit.request.*`.
+- Явно задавайте `body.service.scenario` в ответе; это исходящий сценарий.
+- Используйте `parent.include: false` или не задавайте `parent`, когда ответ не должен нести родительские данные.
