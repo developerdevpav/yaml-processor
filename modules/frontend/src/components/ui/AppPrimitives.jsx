@@ -177,10 +177,28 @@ export function TopologyPlaygroundMenu({
   );
 }
 
-export function Toast({ title, message, onClose, variant = 'success' }) {
+export function Toast({ title, message, onClose, onClick, variant = 'success' }) {
   const isError = variant === 'error';
+  const isClickable = Boolean(onClick);
+  const handleKeyDown = (event) => {
+    if (!isClickable || (event.key !== 'Enter' && event.key !== ' ')) {
+      return;
+    }
+
+    event.preventDefault();
+    onClick();
+  };
+
   return (
-    <div className={cn('app-toast', isError && 'app-toast-error')} role={isError ? 'alert' : 'status'} aria-live="polite">
+    <div
+      className={cn('app-toast', isError && 'app-toast-error', isClickable && 'app-toast-clickable')}
+      role={isError ? 'alert' : 'status'}
+      aria-live="polite"
+      tabIndex={isClickable ? 0 : undefined}
+      onClick={onClick}
+      onKeyDown={handleKeyDown}
+      aria-label={isClickable ? `${title}. ${message || ''}. Открыть детали ошибки.` : undefined}
+    >
       <div className={cn('app-toast__icon', isError && 'app-toast__icon-error')}>
         {isError ? <AlertCircle aria-hidden size={18} /> : <CheckVerified02 aria-hidden size={18} />}
       </div>
@@ -188,7 +206,15 @@ export function Toast({ title, message, onClose, variant = 'success' }) {
         <div className="app-toast__title">{title}</div>
         {message && <div className="app-toast__message">{message}</div>}
       </div>
-      <button type="button" className="app-toast__close" onClick={onClose} aria-label="Закрыть уведомление">
+      <button
+        type="button"
+        className="app-toast__close"
+        onClick={(event) => {
+          event.stopPropagation();
+          onClose();
+        }}
+        aria-label="Закрыть уведомление"
+      >
         <XClose aria-hidden size={16} />
       </button>
     </div>

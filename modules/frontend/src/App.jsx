@@ -541,14 +541,174 @@ const DELETE_REVERSE_OUTPUT_NODE = gql`
 
 function getErrorMessage(error, fallback) {
   if (!error) {
-    return '';
+    return fallback || '';
+  }
+
+  if (typeof error === 'string') {
+    return error || fallback || '';
   }
 
   if (Array.isArray(error.graphQLErrors) && error.graphQLErrors.length > 0) {
     return error.graphQLErrors.map((item) => item.message).join('; ');
   }
 
-  return error.message || fallback;
+  return error.message || fallback || '';
+}
+
+function createToastId() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function getCircularReplacer() {
+  const seen = new WeakSet();
+
+  return (key, value) => {
+    if (typeof value !== 'object' || value === null) {
+      return value;
+    }
+
+    if (seen.has(value)) {
+      return '[Circular]';
+    }
+
+    seen.add(value);
+    return value;
+  };
+}
+
+function formatErrorValue(value) {
+  if (!value) {
+    return '';
+  }
+
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (value instanceof Error) {
+    return [value.name, value.message, value.stack].filter(Boolean).join('\n');
+  }
+
+  try {
+    return JSON.stringify(value, getCircularReplacer(), 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function formatGraphQLError(error, index) {
+  const lines = [`${index + 1}. ${error?.message || formatErrorValue(error)}`];
+
+  if (Array.isArray(error?.path) && error.path.length > 0) {
+    lines.push(`Path: ${error.path.join('.')}`);
+  }
+
+  if (Array.isArray(error?.locations) && error.locations.length > 0) {
+    lines.push(`Locations: ${JSON.stringify(error.locations)}`);
+  }
+
+  if (error?.extensions && Object.keys(error.extensions).length > 0) {
+    lines.push(`Extensions: ${formatErrorValue(error.extensions)}`);
+  }
+
+  return lines.join('\n');
+}
+
+function getErrorDetails(error, fallback) {
+  const message = getErrorMessage(error, fallback) || fallback || 'Произошла ошибка.';
+  const sections = [`Сообщение:\n${message}`];
+
+  if (error && typeof error === 'object') {
+    if (error.name && error.name !== 'Error') {
+      sections.push(`Тип:\n${error.name}`);
+    }
+
+    if (Array.isArray(error.graphQLErrors) && error.graphQLErrors.length > 0) {
+      sections.push(`GraphQL:\n${error.graphQLErrors.map(formatGraphQLError).join('\n\n')}`);
+    }
+
+    if (error.networkError) {
+      sections.push(`Network:\n${formatErrorValue(error.networkError)}`);
+    }
+
+    if (Array.isArray(error.clientErrors) && error.clientErrors.length > 0) {
+      sections.push(`Client errors:\n${error.clientErrors.map(formatErrorValue).join('\n\n')}`);
+    }
+
+    if (error.cause) {
+      sections.push(`Cause:\n${formatErrorValue(error.cause)}`);
+    }
+
+    if (error.stack) {
+      sections.push(`Stack trace:\n${error.stack}`);
+    }
+
+    if (!(error instanceof Error)) {
+      const rawError = formatErrorValue(error);
+      if (rawError && rawError !== '{}' && rawError !== message) {
+        sections.push(`Raw error:\n${rawError}`);
+      }
+    }
+  }
+
+  return sections.filter(Boolean).join('\n\n');
+}
+
+function createErrorInfo(error, fallback = 'Произошла ошибка.') {
+  const message = getErrorMessage(error, fallback) || fallback;
+
+  return {
+    id: createToastId(),
+    title: 'Ошибка',
+    message,
+    details: getErrorDetails(error, fallback),
+    occurredAt: new Date().toISOString(),
+  };
+}
+
+function ErrorDetailsModal({ errorInfo, onClose }) {
+  useEffect(() => {
+    if (!errorInfo) {
+      return undefined;
+    }
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [errorInfo, onClose]);
+
+  if (!errorInfo) {
+    return null;
+  }
+
+  return (
+    <div className="modal-shell error-details-modal" role="dialog" aria-modal="true" aria-labelledby="error-details-title">
+      <div className="modal-shell__backdrop" onClick={onClose} />
+      <div className="modal-card error-details-modal__card">
+        <div className="modal-card__header">
+          <div>
+            <Title headingLevel="h4" className="modal-card__title">
+              <span id="error-details-title">Информация об ошибке</span>
+            </Title>
+            <Text className="modal-card__subtitle">{errorInfo.message}</Text>
+          </div>
+          <button type="button" className="modal-card__close" onClick={onClose} aria-label="Закрыть информацию об ошибке">
+            <XClose aria-hidden size={18} />
+          </button>
+        </div>
+
+        <div className="error-details-modal__meta">
+          <span>Время: {new Date(errorInfo.occurredAt).toLocaleString('ru-RU')}</span>
+        </div>
+        <pre className="error-details-modal__details">{errorInfo.details}</pre>
+      </div>
+    </div>
+  );
 }
 
 function reorderItems(items, fromIndex, toIndex) {
@@ -1358,7 +1518,7 @@ function serializeReverseOutput(output) {
           message: '',
         },
     parent: {
-      include: output.parent?.include ?? false,
+      include: output.parent?.include ?? true,
       mode: output.parent?.mode ?? 'SURFACE',
     },
   };
@@ -2176,6 +2336,7 @@ const NodeEditor = forwardRef(function NodeEditor({
   onOpenJsonLogicPlayground,
   onAddSubprocess,
   onBulkCreateResults,
+  onError,
   contextCodeOptions,
   phaseOptions,
   b3StatusOptions,
@@ -2203,6 +2364,7 @@ const NodeEditor = forwardRef(function NodeEditor({
   const onSaveRef = useRef(onSave);
   const onDraftChangeRef = useRef(onDraftChange);
   const onAutosaveStatusChangeRef = useRef(onAutosaveStatusChange);
+  const onErrorRef = useRef(onError);
   const selectedKind = selected?.kind ?? null;
   const selectedNodeSnapshot = selected?.node ? JSON.stringify(selected.node) : '';
 
@@ -2241,6 +2403,10 @@ const NodeEditor = forwardRef(function NodeEditor({
   useEffect(() => {
     onAutosaveStatusChangeRef.current = onAutosaveStatusChange;
   }, [onAutosaveStatusChange]);
+
+  useEffect(() => {
+    onErrorRef.current = onError;
+  }, [onError]);
 
   useEffect(() => {
     setDraft(selected?.node ?? {});
@@ -2457,7 +2623,9 @@ const NodeEditor = forwardRef(function NodeEditor({
             lastSavedPayloadRef.current = nextPayloadSnapshot;
           }
         })
-        .catch(() => {});
+        .catch((saveError) => {
+          onErrorRef.current?.(saveError, 'Не удалось автоматически сохранить изменения.');
+        });
     }, NODE_AUTOSAVE_DELAY_MS);
 
     return () => {
@@ -2473,8 +2641,10 @@ const NodeEditor = forwardRef(function NodeEditor({
       setSubprocessTriggerError('');
       setSubprocessTriggerStatus('valid');
     } catch {
-      setSubprocessTriggerError('Trigger rule должен быть валидным JSON, чтобы его можно было форматировать.');
+      const errorMessage = 'Trigger rule должен быть валидным JSON, чтобы его можно было форматировать.';
+      setSubprocessTriggerError(errorMessage);
       setSubprocessTriggerStatus('invalid');
+      onErrorRef.current?.(errorMessage, errorMessage);
     }
   };
 
@@ -2486,8 +2656,10 @@ const NodeEditor = forwardRef(function NodeEditor({
       setFilterEventRuleError('');
       setFilterEventRuleStatus('valid');
     } catch {
-      setFilterEventRuleError('Filter event rule должен быть валидным JSON, чтобы его можно было форматировать.');
+      const errorMessage = 'Filter event rule должен быть валидным JSON, чтобы его можно было форматировать.';
+      setFilterEventRuleError(errorMessage);
       setFilterEventRuleStatus('invalid');
+      onErrorRef.current?.(errorMessage, errorMessage);
     }
   };
 
@@ -2499,8 +2671,10 @@ const NodeEditor = forwardRef(function NodeEditor({
       setReverseOutputRuleError('');
       setReverseOutputRuleStatus('valid');
     } catch {
-      setReverseOutputRuleError('Правило должно быть валидным JSON, чтобы его можно было форматировать.');
+      const errorMessage = 'Правило должно быть валидным JSON, чтобы его можно было форматировать.';
+      setReverseOutputRuleError(errorMessage);
       setReverseOutputRuleStatus('invalid');
+      onErrorRef.current?.(errorMessage, errorMessage);
     }
   };
 
@@ -2587,6 +2761,10 @@ const NodeEditor = forwardRef(function NodeEditor({
     log: {
       journalServiceName: '',
       message: '',
+    },
+    parent: {
+      include: true,
+      mode: 'SURFACE',
     },
   });
 
@@ -3164,7 +3342,7 @@ const NodeEditor = forwardRef(function NodeEditor({
                 <FormGroup label="" fieldId="reverse-output-parent-include">
                   <Checkbox
                     id="reverse-output-parent-include"
-                    isChecked={draft.parent?.include ?? false}
+                    isChecked={draft.parent?.include ?? true}
                     onChange={(_, checked) =>
                       updateReverseOutputDraft((current) => ({
                         ...current,
@@ -3187,7 +3365,7 @@ const NodeEditor = forwardRef(function NodeEditor({
                         ...current,
                         parent: {
                           ...(current.parent ?? {}),
-                          include: current.parent?.include ?? false,
+                          include: current.parent?.include ?? true,
                           mode: mode || 'SURFACE',
                         },
                       }))
@@ -3403,6 +3581,7 @@ function ProcessCodeManagerModal({
   onCreate,
   onRename,
   onDelete,
+  onError,
 }) {
   const [newCode, setNewCode] = useState('');
   const [draftCodes, setDraftCodes] = useState({});
@@ -3426,6 +3605,10 @@ function ProcessCodeManagerModal({
   const sortedCodes = [...codes].sort((left, right) => left.localeCompare(right));
   const codeSet = new Set(codes);
   const visibleError = localError || errorMessage;
+  const showLocalError = (message) => {
+    setLocalError(message);
+    onError?.(message, message);
+  };
 
   const validateUniqueCode = (value, currentCode = '') => {
     const validationError = validateProcessCode(value);
@@ -3445,7 +3628,7 @@ function ProcessCodeManagerModal({
     event.preventDefault();
     const validationError = validateUniqueCode(newCode);
     if (validationError) {
-      setLocalError(validationError);
+      showLocalError(validationError);
       return;
     }
 
@@ -3460,7 +3643,7 @@ function ProcessCodeManagerModal({
     const nextCode = normalizeProcessCode(draftCodes[currentCode] ?? currentCode);
     const validationError = validateUniqueCode(nextCode, currentCode);
     if (validationError) {
-      setLocalError(validationError);
+      showLocalError(validationError);
       return;
     }
 
@@ -3475,7 +3658,7 @@ function ProcessCodeManagerModal({
   const handleDelete = async (code) => {
     const usage = codeUsage.get(code);
     if (usage?.totalCount > 0) {
-      setLocalError(`Код процесса "${code}" нельзя удалить. ${formatProcessCodeUsage(usage)}.`);
+      showLocalError(`Код процесса "${code}" нельзя удалить. ${formatProcessCodeUsage(usage)}.`);
       return;
     }
 
@@ -3680,6 +3863,7 @@ export function App() {
   const [localProcessConfig, setLocalProcessConfig] = useState(null);
   const [editorPreview, setEditorPreview] = useState(null);
   const [toast, setToast] = useState(null);
+  const [errorDetails, setErrorDetails] = useState(null);
   const [isExportingProcessConfig, setIsExportingProcessConfig] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
@@ -3805,7 +3989,7 @@ export function App() {
       setYamlEditorBaseline(yaml);
       setYamlEditorSourceKey(getYamlEditorSourceKey(processConfig));
     } catch (requestError) {
-      setYamlEditorError(getErrorMessage(requestError, 'Не удалось загрузить YAML-конфигурацию.'));
+      reportError(setYamlEditorError, requestError, 'Не удалось загрузить YAML-конфигурацию.');
     } finally {
       setIsYamlEditorLoading(false);
     }
@@ -3918,7 +4102,7 @@ export function App() {
 
   const showSuccessToast = (title, message) => {
     setToast({
-      id: Date.now(),
+      id: createToastId(),
       variant: 'success',
       title,
       message,
@@ -3929,46 +4113,60 @@ export function App() {
     showSuccessToast('Изменения сохранены', 'Информация по node успешно обновлена.');
   };
 
-  const showErrorToast = (message) => {
-    if (!message) {
-      return;
+  const showErrorToast = (errorValue, fallback) => {
+    const errorInfo = createErrorInfo(errorValue, fallback);
+    if (!errorInfo.message) {
+      return errorInfo;
     }
 
     setToast({
-      id: Date.now(),
+      id: errorInfo.id,
       variant: 'error',
-      title: 'Ошибка',
-      message,
+      title: errorInfo.title,
+      message: errorInfo.message,
+      errorInfo,
     });
+
+    return errorInfo;
   };
+
+  const reportError = (setErrorMessage, errorValue, fallback) => {
+    const errorInfo = showErrorToast(errorValue, fallback);
+    setErrorMessage?.(errorInfo.message);
+    return errorInfo.message;
+  };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return undefined;
+    }
+
+    const handleGlobalError = (event) => {
+      showErrorToast(event.error || event.message, 'Непредвиденная ошибка приложения.');
+    };
+
+    const handleUnhandledRejection = (event) => {
+      showErrorToast(event.reason, 'Непредвиденная ошибка приложения.');
+    };
+
+    window.addEventListener('error', handleGlobalError);
+    window.addEventListener('unhandledrejection', handleUnhandledRejection);
+
+    return () => {
+      window.removeEventListener('error', handleGlobalError);
+      window.removeEventListener('unhandledrejection', handleUnhandledRejection);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (error && !isInitialLoading) {
+      showErrorToast(error, 'GraphQL недоступен.');
+    }
+  }, [error, isInitialLoading]);
 
   useEffect(() => {
     setProcessPlaygroundTriggerHistory(readProcessPlaygroundTriggerHistory());
   }, []);
-
-  useEffect(() => {
-    if (createErrorMessage) {
-      showErrorToast(createErrorMessage);
-    }
-  }, [createErrorMessage]);
-
-  useEffect(() => {
-    if (updateErrorMessage) {
-      showErrorToast(updateErrorMessage);
-    }
-  }, [updateErrorMessage]);
-
-  useEffect(() => {
-    if (exportErrorMessage) {
-      showErrorToast(exportErrorMessage);
-    }
-  }, [exportErrorMessage]);
-
-  useEffect(() => {
-    if (importErrorMessage) {
-      showErrorToast(importErrorMessage);
-    }
-  }, [importErrorMessage]);
 
   const handleOpenProcessCodeManager = () => {
     setProcessCodeManagerError('');
@@ -3988,12 +4186,13 @@ export function App() {
     const code = normalizeProcessCode(rawCode);
     const validationError = validateProcessCode(code);
     if (validationError) {
-      setProcessCodeManagerError(validationError);
+      reportError(setProcessCodeManagerError, validationError, validationError);
       return false;
     }
 
     if (processCodeOptions.includes(code)) {
-      setProcessCodeManagerError(`Код процесса "${code}" уже существует.`);
+      const errorMessage = `Код процесса "${code}" уже существует.`;
+      reportError(setProcessCodeManagerError, errorMessage, errorMessage);
       return false;
     }
 
@@ -4006,7 +4205,7 @@ export function App() {
       showSuccessToast('Код процесса создан', `Код "${code}" добавлен в справочник.`);
       return true;
     } catch (mutationError) {
-      setProcessCodeManagerError(getErrorMessage(mutationError, 'Не удалось создать код процесса.'));
+      reportError(setProcessCodeManagerError, mutationError, 'Не удалось создать код процесса.');
       return false;
     }
   };
@@ -4015,7 +4214,7 @@ export function App() {
     const nextCode = normalizeProcessCode(rawNextCode);
     const validationError = validateProcessCode(nextCode);
     if (validationError) {
-      setProcessCodeManagerError(validationError);
+      reportError(setProcessCodeManagerError, validationError, validationError);
       return false;
     }
 
@@ -4024,7 +4223,8 @@ export function App() {
     }
 
     if (processCodeOptions.includes(nextCode)) {
-      setProcessCodeManagerError(`Код процесса "${nextCode}" уже существует.`);
+      const errorMessage = `Код процесса "${nextCode}" уже существует.`;
+      reportError(setProcessCodeManagerError, errorMessage, errorMessage);
       return false;
     }
 
@@ -4043,7 +4243,7 @@ export function App() {
       showSuccessToast('Код процесса обновлен', `Код "${currentCode}" переименован в "${nextCode}".`);
       return true;
     } catch (mutationError) {
-      setProcessCodeManagerError(getErrorMessage(mutationError, 'Не удалось обновить код процесса.'));
+      reportError(setProcessCodeManagerError, mutationError, 'Не удалось обновить код процесса.');
       return false;
     }
   };
@@ -4051,18 +4251,21 @@ export function App() {
   const handleDeleteProcessCode = async (rawCode) => {
     const code = normalizeProcessCode(rawCode);
     if (!code) {
-      setProcessCodeManagerError('Код процесса не должен быть пустым.');
+      const errorMessage = 'Код процесса не должен быть пустым.';
+      reportError(setProcessCodeManagerError, errorMessage, errorMessage);
       return false;
     }
 
     if (!processCodeOptions.includes(code)) {
-      setProcessCodeManagerError(`Код процесса "${code}" не найден.`);
+      const errorMessage = `Код процесса "${code}" не найден.`;
+      reportError(setProcessCodeManagerError, errorMessage, errorMessage);
       return false;
     }
 
     const usage = processCodeUsage.get(code);
     if (usage?.totalCount > 0) {
-      setProcessCodeManagerError(`Код процесса "${code}" нельзя удалить. ${formatProcessCodeUsage(usage)}.`);
+      const errorMessage = `Код процесса "${code}" нельзя удалить. ${formatProcessCodeUsage(usage)}.`;
+      reportError(setProcessCodeManagerError, errorMessage, errorMessage);
       return false;
     }
 
@@ -4083,7 +4286,7 @@ export function App() {
       showSuccessToast('Код процесса удален', `Код "${code}" удален из справочника.`);
       return true;
     } catch (mutationError) {
-      setProcessCodeManagerError(getErrorMessage(mutationError, 'Не удалось удалить код процесса.'));
+      reportError(setProcessCodeManagerError, mutationError, 'Не удалось удалить код процесса.');
       return false;
     }
   };
@@ -4102,7 +4305,7 @@ export function App() {
       return true;
     } catch (mutationError) {
       setLocalProcessConfig(serverActiveProcessConfig);
-      setUpdateErrorMessage(getErrorMessage(mutationError, 'Не удалось сохранить изменения процесса.'));
+      reportError(setUpdateErrorMessage, mutationError, 'Не удалось сохранить изменения процесса.');
       return false;
     }
   };
@@ -4149,7 +4352,7 @@ export function App() {
       return true;
     } catch (mutationError) {
       setLocalProcessConfig(serverActiveProcessConfig);
-      setUpdateErrorMessage(getErrorMessage(mutationError, 'Не удалось сохранить изменения stage.'));
+      reportError(setUpdateErrorMessage, mutationError, 'Не удалось сохранить изменения stage.');
       return false;
     }
   };
@@ -4178,7 +4381,7 @@ export function App() {
       return true;
     } catch (mutationError) {
       setLocalProcessConfig(serverActiveProcessConfig);
-      setUpdateErrorMessage(getErrorMessage(mutationError, 'Не удалось сохранить изменения subprocess.'));
+      reportError(setUpdateErrorMessage, mutationError, 'Не удалось сохранить изменения subprocess.');
       return false;
     }
   };
@@ -4209,7 +4412,7 @@ export function App() {
       return true;
     } catch (mutationError) {
       setLocalProcessConfig(serverActiveProcessConfig);
-      setUpdateErrorMessage(getErrorMessage(mutationError, 'Не удалось сохранить reverse.'));
+      reportError(setUpdateErrorMessage, mutationError, 'Не удалось сохранить reverse.');
       return false;
     }
   };
@@ -4237,7 +4440,7 @@ export function App() {
       return true;
     } catch (mutationError) {
       setLocalProcessConfig(serverActiveProcessConfig);
-      setUpdateErrorMessage(getErrorMessage(mutationError, 'Не удалось сохранить reverse output.'));
+      reportError(setUpdateErrorMessage, mutationError, 'Не удалось сохранить reverse output.');
       return false;
     }
   };
@@ -4272,7 +4475,7 @@ export function App() {
       return true;
     } catch (mutationError) {
       setLocalProcessConfig(serverActiveProcessConfig);
-      setUpdateErrorMessage(getErrorMessage(mutationError, 'Не удалось сохранить result.'));
+      reportError(setUpdateErrorMessage, mutationError, 'Не удалось сохранить result.');
       return false;
     }
   };
@@ -4305,7 +4508,7 @@ export function App() {
       return true;
     } catch (mutationError) {
       setLocalProcessConfig(serverActiveProcessConfig);
-      setUpdateErrorMessage(getErrorMessage(mutationError, 'Не удалось сохранить изменения process.'));
+      reportError(setUpdateErrorMessage, mutationError, 'Не удалось сохранить изменения process.');
       return false;
     }
   };
@@ -4321,7 +4524,8 @@ export function App() {
 
       const created = response.data?.createProcessConfig;
       if (!created?.id) {
-        setCreateErrorMessage('GraphQL не вернул созданный процесс. Проверьте backend-логи и схему мутации.');
+        const errorMessage = 'GraphQL не вернул созданный процесс. Проверьте backend-логи и схему мутации.';
+        reportError(setCreateErrorMessage, errorMessage, errorMessage);
         return;
       }
 
@@ -4335,7 +4539,7 @@ export function App() {
         setExpandedNodeIds(getDefaultExpandedNodeIds(created));
       }
     } catch (mutationError) {
-      setCreateErrorMessage(getErrorMessage(mutationError, 'Не удалось создать процесс.'));
+      reportError(setCreateErrorMessage, mutationError, 'Не удалось создать процесс.');
     }
   };
 
@@ -4388,19 +4592,24 @@ export function App() {
       return;
     }
 
-    await createSubprocessNode({
-      variables: {
-        processId,
-        input: stripTypename(
-          serializeSubprocess(createDefaultSubprocess((workingProcessConfig.process.subprocess ?? []).length + 1)),
-        ),
-      },
-    });
-    await refetch();
-    setExpandedNodeIds((current) => {
-      const processNodeId = workingProcessConfig.process?.id ? `process:${workingProcessConfig.process.id}` : null;
-      return processNodeId && !current.includes(processNodeId) ? [...current, processNodeId] : current;
-    });
+    try {
+      setUpdateErrorMessage('');
+      await createSubprocessNode({
+        variables: {
+          processId,
+          input: stripTypename(
+            serializeSubprocess(createDefaultSubprocess((workingProcessConfig.process.subprocess ?? []).length + 1)),
+          ),
+        },
+      });
+      await refetch();
+      setExpandedNodeIds((current) => {
+        const processNodeId = workingProcessConfig.process?.id ? `process:${workingProcessConfig.process.id}` : null;
+        return processNodeId && !current.includes(processNodeId) ? [...current, processNodeId] : current;
+      });
+    } catch (mutationError) {
+      reportError(setUpdateErrorMessage, mutationError, 'Не удалось создать subprocess.');
+    }
   };
 
   const handleAddStage = async () => {
@@ -4414,14 +4623,19 @@ export function App() {
       return;
     }
 
-    await createStageNode({
-      variables: {
-        subprocessId,
-        input: stripTypename(serializeStage(createDefaultStage((subprocess.stages ?? []).length + 1))),
-      },
-    });
-    await refetch();
-    setExpandedNodeIds((current) => (current.includes(editorNodeId) ? current : [...current, editorNodeId]));
+    try {
+      setUpdateErrorMessage('');
+      await createStageNode({
+        variables: {
+          subprocessId,
+          input: stripTypename(serializeStage(createDefaultStage((subprocess.stages ?? []).length + 1))),
+        },
+      });
+      await refetch();
+      setExpandedNodeIds((current) => (current.includes(editorNodeId) ? current : [...current, editorNodeId]));
+    } catch (mutationError) {
+      reportError(setUpdateErrorMessage, mutationError, 'Не удалось создать stage.');
+    }
   };
 
   const handleToggleNode = (nodeId) => {
@@ -4478,7 +4692,8 @@ export function App() {
       if (kind === 'subprocess') {
         const subprocess = findSelectedNode(workingProcessConfig, nodeId)?.node;
         if (!subprocess?.id) {
-          setUpdateErrorMessage('Не удалось определить subprocess для создания stage.');
+          const errorMessage = 'Не удалось определить subprocess для создания stage.';
+          reportError(setUpdateErrorMessage, errorMessage, errorMessage);
           return;
         }
 
@@ -4493,7 +4708,8 @@ export function App() {
         const selectedStage = findSelectedNode(workingProcessConfig, nodeId);
         const configuratorId = selectedStage?.node?.configurator?.id;
         if (!configuratorId) {
-          setUpdateErrorMessage('Не удалось определить configurator stage для создания result.');
+          const errorMessage = 'Не удалось определить configurator stage для создания result.';
+          reportError(setUpdateErrorMessage, errorMessage, errorMessage);
           return;
         }
 
@@ -4510,7 +4726,8 @@ export function App() {
         const selectedResult = findSelectedNode(workingProcessConfig, nodeId);
         const resultId = selectedResult?.node?.id;
         if (!resultId) {
-          setUpdateErrorMessage('Не удалось определить result для создания reverse.');
+          const errorMessage = 'Не удалось определить result для создания reverse.';
+          reportError(setUpdateErrorMessage, errorMessage, errorMessage);
           return;
         }
 
@@ -4527,7 +4744,8 @@ export function App() {
         const selectedReverse = findSelectedNode(workingProcessConfig, nodeId);
         const reverseId = selectedReverse?.node?.id;
         if (!reverseId) {
-          setUpdateErrorMessage('Не удалось определить reverse для создания reverse output.');
+          const errorMessage = 'Не удалось определить reverse для создания reverse output.';
+          reportError(setUpdateErrorMessage, errorMessage, errorMessage);
           return;
         }
 
@@ -4541,7 +4759,7 @@ export function App() {
               body: null,
               log: null,
               parent: {
-                include: false,
+                include: true,
                 mode: 'SURFACE',
               },
             }),
@@ -4554,17 +4772,16 @@ export function App() {
       setExpandedNodeIds((current) => (current.includes(nodeId) ? current : [...current, nodeId]));
       await refetch();
     } catch (mutationError) {
-      setUpdateErrorMessage(
-        getErrorMessage(
-          mutationError,
-          kind === 'subprocess'
-            ? 'Не удалось создать stage.'
-            : kind === 'stage'
-            ? 'Не удалось создать result.'
-            : kind === 'result'
-              ? 'Не удалось создать reverse.'
-              : 'Не удалось создать reverse output.',
-        ),
+      reportError(
+        setUpdateErrorMessage,
+        mutationError,
+        kind === 'subprocess'
+          ? 'Не удалось создать stage.'
+          : kind === 'stage'
+          ? 'Не удалось создать result.'
+          : kind === 'result'
+            ? 'Не удалось создать reverse.'
+            : 'Не удалось создать reverse output.',
       );
     }
   };
@@ -4578,7 +4795,8 @@ export function App() {
     const selectedStage = findSelectedNode(workingProcessConfig, nodeId);
     const configuratorId = selectedStage?.node?.configurator?.id;
     if (!configuratorId) {
-      setUpdateErrorMessage('Не удалось определить configurator stage для массового создания results.');
+      const errorMessage = 'Не удалось определить configurator stage для массового создания results.';
+      reportError(setUpdateErrorMessage, errorMessage, errorMessage);
       return;
     }
 
@@ -4600,7 +4818,7 @@ export function App() {
       setExpandedNodeIds((current) => (current.includes(nodeId) ? current : [...current, nodeId]));
       await refetch();
     } catch (mutationError) {
-      setUpdateErrorMessage(getErrorMessage(mutationError, 'Не удалось массово создать results.'));
+      reportError(setUpdateErrorMessage, mutationError, 'Не удалось массово создать results.');
     }
   };
 
@@ -4655,7 +4873,7 @@ export function App() {
       setSelectedNodeId(null);
       await refetch();
     } catch (mutationError) {
-      setUpdateErrorMessage(getErrorMessage(mutationError, 'Не удалось удалить узел.'));
+      reportError(setUpdateErrorMessage, mutationError, 'Не удалось удалить узел.');
     }
   };
 
@@ -4762,7 +4980,7 @@ export function App() {
 
       setYamlEditorText(await response.text());
     } catch (requestError) {
-      setYamlEditorError(getErrorMessage(requestError, 'Не удалось отформатировать YAML.'));
+      reportError(setYamlEditorError, requestError, 'Не удалось отформатировать YAML.');
     } finally {
       setIsYamlEditorBeautifying(false);
     }
@@ -4819,7 +5037,7 @@ export function App() {
       }
       showSuccessToast('YAML сохранен', 'Конфигурация процесса обновлена.');
     } catch (requestError) {
-      setYamlEditorError(getErrorMessage(requestError, 'Не удалось сохранить YAML-конфигурацию.'));
+      reportError(setYamlEditorError, requestError, 'Не удалось сохранить YAML-конфигурацию.');
     } finally {
       setIsYamlEditorSaving(false);
     }
@@ -4854,7 +5072,8 @@ export function App() {
 
       const response = await fetch(`/api/process-configs/${activeProcessConfig.id}/export`);
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+        const errorText = await response.text();
+        throw new Error(errorText || `HTTP ${response.status}`);
       }
 
       const filename =
@@ -4864,7 +5083,7 @@ export function App() {
       downloadBlob(blob, filename);
       handleCloseExportModal();
     } catch (requestError) {
-      setExportErrorMessage(getErrorMessage(requestError, 'Не удалось скачать YAML-конфигурацию процесса.'));
+      reportError(setExportErrorMessage, requestError, 'Не удалось скачать YAML-конфигурацию процесса.');
     } finally {
       setIsExportingProcessConfig(false);
     }
@@ -4905,7 +5124,7 @@ export function App() {
       await refetch();
       showSuccessToast('Процесс удален', `Процесс "${processLabel}" удален вместе со всей вложенной конфигурацией.`);
     } catch (mutationError) {
-      setUpdateErrorMessage(getErrorMessage(mutationError, 'Не удалось удалить процесс.'));
+      reportError(setUpdateErrorMessage, mutationError, 'Не удалось удалить процесс.');
     }
   };
 
@@ -4973,7 +5192,8 @@ export function App() {
     const yamlFiles = files.filter((file) => /\.ya?ml$/i.test(file.name));
 
     if (files.length > 0 && yamlFiles.length === 0) {
-      setImportErrorMessage('В выбранных файлах не найдено YAML-конфигураций с расширением .yaml или .yml.');
+      const errorMessage = 'В выбранных файлах не найдено YAML-конфигураций с расширением .yaml или .yml.';
+      reportError(setImportErrorMessage, errorMessage, errorMessage);
       return;
     }
 
@@ -5015,9 +5235,7 @@ export function App() {
       const payload = await response.json();
       setJsonLogicPlaygroundResult(stringifyJsonForEditor(payload?.result));
     } catch (requestError) {
-      setJsonLogicPlaygroundError(
-        getErrorMessage(requestError, 'Не удалось проверить JsonLogic правило.'),
-      );
+      reportError(setJsonLogicPlaygroundError, requestError, 'Не удалось проверить JsonLogic правило.');
       setJsonLogicPlaygroundResult('');
     } finally {
       setIsEvaluatingJsonLogic(false);
@@ -5047,7 +5265,7 @@ export function App() {
         return next;
       });
     } catch (requestError) {
-      setProcessPlaygroundError(getErrorMessage(requestError, 'Не удалось проиграть процессы.'));
+      reportError(setProcessPlaygroundError, requestError, 'Не удалось проиграть процессы.');
       setProcessPlaygroundResult(null);
     } finally {
       setIsEvaluatingProcessPlayground(false);
@@ -5076,7 +5294,8 @@ export function App() {
     const target = findProcessPlaygroundNodeTarget(playgroundProcessConfigs, targetNode);
 
     if (!target) {
-      setProcessPlaygroundError('Не удалось найти node в React Flow.');
+      const errorMessage = 'Не удалось найти node в React Flow.';
+      reportError(setProcessPlaygroundError, errorMessage, errorMessage);
       return;
     }
 
@@ -5155,7 +5374,7 @@ export function App() {
       );
       handleCloseImportModal(true);
     } catch (requestError) {
-      setImportErrorMessage(getErrorMessage(requestError, 'Не удалось импортировать YAML-файлы.'));
+      reportError(setImportErrorMessage, requestError, 'Не удалось импортировать YAML-файлы.');
     } finally {
       setIsImportingProcessConfig(false);
     }
@@ -5199,7 +5418,7 @@ export function App() {
       await refetch();
     } catch (mutationError) {
       setLocalProcessConfig(serverActiveProcessConfig);
-      setUpdateErrorMessage(getErrorMessage(mutationError, 'Не удалось изменить порядок stage.'));
+      reportError(setUpdateErrorMessage, mutationError, 'Не удалось изменить порядок stage.');
     }
   };
 
@@ -5255,8 +5474,17 @@ export function App() {
       await refetch();
     } catch (mutationError) {
       setLocalProcessConfig(serverActiveProcessConfig);
-      setUpdateErrorMessage(getErrorMessage(mutationError, 'Не удалось изменить порядок reverse output.'));
+      reportError(setUpdateErrorMessage, mutationError, 'Не удалось изменить порядок reverse output.');
     }
+  };
+
+  const handleOpenToastDetails = () => {
+    if (toast?.variant !== 'error' || !toast.errorInfo) {
+      return;
+    }
+
+    setErrorDetails(toast.errorInfo);
+    setToast(null);
   };
 
   return (
@@ -5416,6 +5644,7 @@ export function App() {
                 onOpenJsonLogicPlayground={handleOpenJsonLogicPlayground}
                 onAddSubprocess={handleAddSubprocess}
                 onBulkCreateResults={handleBulkCreateResults}
+                onError={(errorValue, fallback) => showErrorToast(errorValue, fallback)}
                 contextCodeOptions={processCodeOptions}
                 phaseOptions={phaseOptions}
                 b3StatusOptions={b3StatusOptions}
@@ -5538,8 +5767,18 @@ export function App() {
             onCreate={handleCreateProcessCode}
             onRename={handleRenameProcessCode}
             onDelete={handleDeleteProcessCode}
+            onError={(errorValue, fallback) => showErrorToast(errorValue, fallback)}
           />
-          {toast && <Toast title={toast.title} message={toast.message} variant={toast.variant} onClose={() => setToast(null)} />}
+          <ErrorDetailsModal errorInfo={errorDetails} onClose={() => setErrorDetails(null)} />
+          {toast && (
+            <Toast
+              title={toast.title}
+              message={toast.message}
+              variant={toast.variant}
+              onClose={() => setToast(null)}
+              onClick={toast.variant === 'error' ? handleOpenToastDetails : undefined}
+            />
+          )}
         </div>
       </div>
     </Page>

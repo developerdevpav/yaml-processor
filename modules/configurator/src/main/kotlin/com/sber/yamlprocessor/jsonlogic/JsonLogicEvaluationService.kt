@@ -9,7 +9,9 @@ import org.springframework.stereotype.Service
 class JsonLogicEvaluationService(
     private val objectMapper: ObjectMapper
 ) {
-    private val jsonLogic = JsonLogic()
+    private val jsonLogic = JsonLogic().apply {
+        addOperation(RegexpExpression)
+    }
 
     fun evaluate(rule: JsonNode, data: JsonNode?): JsonNode {
         val result = jsonLogic.apply(

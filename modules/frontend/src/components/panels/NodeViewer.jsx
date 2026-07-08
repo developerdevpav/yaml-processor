@@ -93,7 +93,7 @@ export function NodeViewer({ processConfig, selectedNodeId, findSelectedNode, fo
             </div>
             <div className="viewer-section">
               <Title headingLevel="h5">Родительский процесс</Title>
-              <StaticField label="Включить установку" value={node.parent?.include ? 'Да' : 'Нет'} />
+              <StaticField label="Включить установку" value={(node.parent?.include ?? true) ? 'Да' : 'Нет'} />
               <StaticField label="Источник" value={node.parent?.mode || 'SURFACE'} />
             </div>
             <div className="viewer-section">
