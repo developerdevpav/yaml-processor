@@ -1,4 +1,4 @@
-import { Plus, XClose, ZapCircle } from '@untitledui/icons';
+import { Check, FolderPlus, Play, Plus, Trash01, XClose, ZapCircle } from '@untitledui/icons';
 import { useEffect, useRef, useState } from 'react';
 import { Button, Text, Title } from '../ui/AppPrimitives';
 import { cn, formatJsonSnippet } from '../../utils/ui';
@@ -143,6 +143,7 @@ export function FileUploadModal({
   onRemoveFile,
 }) {
   const inputRef = useRef(null);
+  const directoryInputRef = useRef(null);
   useEscapeKey(isOpen, onClose);
 
   if (!isOpen) {
@@ -156,6 +157,8 @@ export function FileUploadModal({
     }
     event.target.value = '';
   };
+
+  const getFilePath = (file) => file.webkitRelativePath || file.name;
 
   const handleDrop = (event) => {
     event.preventDefault();
@@ -175,7 +178,7 @@ export function FileUploadModal({
               <span id="yaml-import-title">Импортировать YAML</span>
             </Title>
             <Text className="modal-card__subtitle">
-              Загрузите один или несколько YAML-файлов. Для каждого файла backend создаст новый процесс.
+              Загрузите YAML-файлы или выберите директорию. Директория будет просканирована рекурсивно.
             </Text>
           </div>
           <button type="button" className="modal-card__close" onClick={onClose} aria-label="Закрыть окно импорта">
@@ -188,19 +191,35 @@ export function FileUploadModal({
             <Plus aria-hidden size={20} />
           </div>
           <div className="file-uploader__title">Перетащите YAML сюда</div>
-          <div className="file-uploader__subtitle">или выберите файлы вручную</div>
-          <Button variant="secondary" onClick={() => inputRef.current?.click()}>
-            Выбрать файлы
-          </Button>
+          <div className="file-uploader__subtitle">или выберите файлы/директорию вручную</div>
+          <div className="file-uploader__actions">
+            <Button variant="secondary" onClick={() => inputRef.current?.click()}>
+              Выбрать файлы
+            </Button>
+            <Button variant="secondary" onClick={() => directoryInputRef.current?.click()}>
+              <FolderPlus aria-hidden size={16} />
+              Выбрать директорию
+            </Button>
+          </div>
           <input ref={inputRef} type="file" hidden multiple accept=".yaml,.yml" onChange={handleFileChange} />
+          <input
+            ref={directoryInputRef}
+            type="file"
+            hidden
+            multiple
+            accept=".yaml,.yml"
+            directory=""
+            webkitdirectory=""
+            onChange={handleFileChange}
+          />
         </div>
 
         {files.length > 0 && (
           <div className="file-uploader__list">
             {files.map((file, index) => (
-              <div key={`${file.name}-${file.size}-${file.lastModified}-${index}`} className="file-uploader__item">
+              <div key={`${getFilePath(file)}-${file.size}-${file.lastModified}-${index}`} className="file-uploader__item">
                 <div>
-                  <div className="file-uploader__filename">{file.name}</div>
+                  <div className="file-uploader__filename">{getFilePath(file)}</div>
                   <div className="file-uploader__meta">{Math.max(1, Math.round(file.size / 1024))} KB</div>
                 </div>
                 <button
@@ -345,6 +364,231 @@ export function JsonLogicPlaygroundModal({
               onChange={onRuleChange}
               onBeautify={() => onRuleChange(formatJsonSnippet(ruleText))}
               helperText="Укажите JsonLogic правило в формате JSON."
+              showLineNumbers
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function formatEventCount(count) {
+  return `${count ?? 0} событ.`;
+}
+
+function ProcessPlaygroundNode({ label, meta, children, autoMatched = false, isProcess = false, onSelect }) {
+  const childItems = Array.isArray(children) ? children.filter(Boolean) : children;
+  const hasChildren = Array.isArray(childItems) ? childItems.length > 0 : Boolean(childItems);
+  const labelClassName = cn('process-playground-tree__label', isProcess && 'process-playground-tree__label--process');
+
+  return (
+    <li className="process-playground-tree__item">
+      <div className="process-playground-tree__row">
+        <span className="process-playground-tree__check" title="Попал в выборку" aria-label="Попал в выборку">
+          <Check aria-hidden size={10} />
+        </span>
+        {onSelect ? (
+          <button type="button" className={cn(labelClassName, 'process-playground-tree__label-button')} onClick={onSelect}>
+            {label}
+          </button>
+        ) : (
+          <span className={labelClassName}>{label}</span>
+        )}
+        {autoMatched && <span className="process-playground-tree__badge-muted">без rule</span>}
+        {meta && <span className="process-playground-tree__meta">{meta}</span>}
+      </div>
+      {hasChildren && <ol className="process-playground-tree__children">{childItems}</ol>}
+    </li>
+  );
+}
+
+function ProcessPlaygroundTree({ result, onSelectNode }) {
+  if (!result) {
+    return (
+      <div className="process-playground__result process-playground__result--empty">
+        <span className="process-playground__empty">Запустите проверку.</span>
+      </div>
+    );
+  }
+
+  const hasMatches = (result.processes ?? []).length > 0;
+  const getSelectHandler = (item, fallbackProcessConfigId) =>
+    onSelectNode && item?.nodeId
+      ? () =>
+          onSelectNode({
+            processConfigId: item.processConfigId ?? fallbackProcessConfigId,
+            nodeId: item.nodeId,
+            expandedNodeIds: item.expandedNodeIds ?? [],
+          })
+      : undefined;
+
+  return (
+    <div className={cn('process-playground__result', !hasMatches && 'process-playground__result--empty')}>
+      {!hasMatches ? (
+        <span className="process-playground__empty">Нет процессов обрабатывающих Trigger</span>
+      ) : (
+        <ol className="process-playground-tree">
+          {result.processes.map((process) => (
+            <ProcessPlaygroundNode key={process.id} label={process.label} isProcess onSelect={getSelectHandler(process)}>
+              {process.subprocesses.map((subprocess) => (
+                <ProcessPlaygroundNode key={subprocess.id} label={subprocess.label} onSelect={getSelectHandler(subprocess, process.processConfigId)}>
+                  {subprocess.stages.map((stage) => (
+                    <ProcessPlaygroundNode
+                      key={stage.id}
+                      label={stage.label}
+                      meta={formatEventCount(stage.eventCount)}
+                      onSelect={getSelectHandler(stage, process.processConfigId)}
+                    >
+                      {stage.scenarios.map((scenario) => (
+                        <ProcessPlaygroundNode
+                          key={scenario.id}
+                          label={scenario.label}
+                          meta={formatEventCount(scenario.eventCount)}
+                          onSelect={getSelectHandler(scenario, process.processConfigId)}
+                        >
+                          {scenario.statuses.map((status) => (
+                            <ProcessPlaygroundNode
+                              key={status.id}
+                              label={status.label}
+                              meta={formatEventCount(status.eventCount)}
+                              onSelect={getSelectHandler(status, process.processConfigId)}
+                            >
+                              {status.outputs.map((output) => (
+                                <ProcessPlaygroundNode
+                                  key={output.id}
+                                  label={output.label}
+                                  meta={formatEventCount(output.eventCount)}
+                                  autoMatched={output.autoMatched}
+                                  onSelect={getSelectHandler(output, process.processConfigId)}
+                                />
+                              ))}
+                            </ProcessPlaygroundNode>
+                          ))}
+                        </ProcessPlaygroundNode>
+                      ))}
+                    </ProcessPlaygroundNode>
+                  ))}
+                </ProcessPlaygroundNode>
+              ))}
+            </ProcessPlaygroundNode>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+function ProcessPlaygroundHistory({ items = [], onSelectItem, onClear }) {
+  const hasItems = items.length > 0;
+
+  return (
+    <div className="process-playground-history">
+      <div className="process-playground-history__header">
+        <span className="process-playground-history__title">История Trigger</span>
+        {hasItems && (
+          <button type="button" className="process-playground-history__clear" onClick={onClear}>
+            <Trash01 aria-hidden size={12} />
+            Очистить
+          </button>
+        )}
+      </div>
+      {hasItems ? (
+        <div className="process-playground-history__list" aria-label="История Trigger">
+          {items.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className="process-playground-history__item"
+              onClick={() => onSelectItem?.(item)}
+              title="Вставить Trigger из истории"
+            >
+              <span className="process-playground-history__item-title">{item.title || 'Trigger'}</span>
+              <span className="process-playground-history__item-meta">
+                {[item.meta, item.savedAtLabel].filter(Boolean).join(' · ')}
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <span className="process-playground-history__empty">История пуста.</span>
+      )}
+    </div>
+  );
+}
+
+export function ProcessPlaygroundModal({
+  isOpen,
+  triggerText,
+  triggerHistory,
+  result,
+  isSubmitting,
+  errorMessage,
+  onClose,
+  onTriggerChange,
+  onEvaluate,
+  onSelectTriggerHistoryItem,
+  onClearTriggerHistory,
+  onSelectNode,
+}) {
+  useEscapeKey(isOpen, onClose);
+
+  if (!isOpen) {
+    return null;
+  }
+
+  return (
+    <div className="modal-shell modal-shell-playground" role="dialog" aria-modal="true" aria-labelledby="process-playground-title">
+      <div className="modal-shell__backdrop" onClick={onClose} />
+      <div className="modal-card modal-card-playground">
+        <div className="modal-card__header">
+          <div>
+            <Title headingLevel="h4" className="modal-card__title">
+              <span id="process-playground-title">Playground процесса</span>
+            </Title>
+          </div>
+          <button type="button" className="modal-card__close" onClick={onClose} aria-label="Закрыть playground процесса">
+            <XClose aria-hidden size={18} />
+          </button>
+        </div>
+
+        <div className="process-playground">
+          <div className="process-playground__panel process-playground__panel--result">
+            <ProcessPlaygroundTree result={result} onSelectNode={onSelectNode} />
+          </div>
+
+          <div className="process-playground__action">
+            <div className="process-playground__play-control">
+              <Button
+                variant="success"
+                className="process-playground__play-button"
+                aria-label="Запустить"
+                title="Запустить"
+                onClick={onEvaluate}
+                isLoading={isSubmitting}
+              >
+                {!isSubmitting && <Play aria-hidden size={16} />}
+              </Button>
+              <span className="process-playground__play-label">Запустить</span>
+            </div>
+            {errorMessage && <p className="jsonlogic-playground__error">{errorMessage}</p>}
+          </div>
+
+          <div className="process-playground__panel">
+            <div className="process-playground__panel-header">
+              <Title headingLevel="h5">Trigger</Title>
+              <ProcessPlaygroundHistory
+                items={triggerHistory}
+                onSelectItem={onSelectTriggerHistoryItem}
+                onClear={onClearTriggerHistory}
+              />
+            </div>
+            <JsonSnippetEditor
+              id="process-playground-trigger"
+              value={triggerText}
+              onChange={onTriggerChange}
+              onBeautify={() => onTriggerChange(formatJsonSnippet(triggerText))}
+              helperText="Укажите Trigger JSON."
               showLineNumbers
             />
           </div>

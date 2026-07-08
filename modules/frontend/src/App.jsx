@@ -2,7 +2,13 @@ import { gql, useMutation, useQuery } from '@apollo/client';
 import { CheckVerified02, Plus, Save01, Trash01, XCircle, XClose } from '@untitledui/icons';
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { Position } from 'reactflow';
-import { FileUploadModal, ExportTypeModal, JsonLogicPlaygroundModal, JsonSnippetEditor } from './components/modals/YamlModals';
+import {
+  FileUploadModal,
+  ExportTypeModal,
+  JsonLogicPlaygroundModal,
+  JsonSnippetEditor,
+  ProcessPlaygroundModal,
+} from './components/modals/YamlModals';
 import { NodeViewer } from './components/panels/NodeViewer';
 import { ProcessTopology } from './components/topology/ProcessTopology';
 import { ProcessSelectField } from './components/ProcessSelectField';
@@ -57,6 +63,14 @@ function downloadBlob(blob, filename) {
   window.URL.revokeObjectURL(objectUrl);
 }
 
+function getImportFilePath(file) {
+  return file?.webkitRelativePath || file?.name || '';
+}
+
+function getImportFileKey(file) {
+  return `${getImportFilePath(file)}:${file?.size ?? 0}:${file?.lastModified ?? 0}`;
+}
+
 function formatAutosaveCountdownLabel(secondsLeft) {
   return `${Math.max(1, Math.ceil(secondsLeft))} c`;
 }
@@ -78,6 +92,58 @@ function validateProcessCode(value) {
   }
 
   return '';
+}
+
+function incrementProcessCodeUsage(usageMap, rawCode, usageKey) {
+  const code = normalizeProcessCode(rawCode);
+  if (!code) {
+    return;
+  }
+
+  const current = usageMap.get(code) ?? {
+    processCount: 0,
+    stageCount: 0,
+    totalCount: 0,
+  };
+
+  usageMap.set(code, {
+    ...current,
+    [usageKey]: current[usageKey] + 1,
+    totalCount: current.totalCount + 1,
+  });
+}
+
+function buildProcessCodeUsage(processConfigs) {
+  const usageMap = new Map();
+
+  processConfigs.forEach((config) => {
+    const process = config?.process;
+    incrementProcessCodeUsage(usageMap, process?.contextCode?.code, 'processCount');
+
+    (process?.subprocess ?? []).forEach((subprocess) => {
+      (subprocess?.stages ?? []).forEach((stage) => {
+        incrementProcessCodeUsage(usageMap, stage?.contextCode?.code, 'stageCount');
+      });
+    });
+  });
+
+  return usageMap;
+}
+
+function formatProcessCodeUsage(usage) {
+  if (!usage?.totalCount) {
+    return 'Не используется';
+  }
+
+  const parts = [];
+  if (usage.processCount > 0) {
+    parts.push(`процессов: ${usage.processCount}`);
+  }
+  if (usage.stageCount > 0) {
+    parts.push(`стадий: ${usage.stageCount}`);
+  }
+
+  return `Используется, ${parts.join(', ')}`;
 }
 
 function getYamlEditorSourceKey(processConfig) {
@@ -302,6 +368,12 @@ const RENAME_CONTEXT_CODE = gql`
   }
 `;
 
+const DELETE_CONTEXT_CODE = gql`
+  mutation DeleteContextCode($id: ID!) {
+    deleteContextCodesDictionary(id: $id)
+  }
+`;
+
 const UPDATE_STAGE_NODE = gql`
   mutation UpdateStageNode($id: ID!, $input: StageInput!) {
     updateStageNode(id: $id, input: $input) {
@@ -512,6 +584,488 @@ function sanitizeInputScenarios(items) {
   return (items ?? []).map((item) => item.trim()).filter(Boolean);
 }
 
+const DEFAULT_PROCESS_PLAYGROUND_TRIGGER = JSON.stringify(
+  {
+    triggerId: null,
+    triggerCode: '',
+    activityId: '',
+    events: [],
+  },
+  null,
+  2,
+);
+
+const PROCESS_PLAYGROUND_TRIGGER_HISTORY_KEY = 'yamlProcessor.processPlaygroundTriggerHistory.v1';
+const PROCESS_PLAYGROUND_TRIGGER_HISTORY_LIMIT = 12;
+
+function getEventService(event) {
+  return (
+    event?.body?.eventObject?.service ??
+    event?.body?.service ??
+    event?.header?.body?.eventObject?.service ??
+    event?.header?.body?.service ??
+    {}
+  );
+}
+
+function getReferenceCode(value) {
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  return value?.code ?? '';
+}
+
+function formatProcessPlaygroundHistoryDate(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+
+  return date.toLocaleString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function createProcessPlaygroundHistoryId() {
+  if (typeof window !== 'undefined' && window.crypto?.randomUUID) {
+    return window.crypto.randomUUID();
+  }
+
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function getProcessPlaygroundTriggerHistoryTitle(trigger) {
+  const events = Array.isArray(trigger?.events) ? trigger.events : [];
+  const firstService = getEventService(events[0]);
+
+  return (
+    String(trigger?.triggerCode ?? '').trim() ||
+    String(trigger?.activityId ?? '').trim() ||
+    String(firstService.scenario ?? '').trim() ||
+    'Trigger'
+  );
+}
+
+function getProcessPlaygroundTriggerHistoryMeta(trigger) {
+  const events = Array.isArray(trigger?.events) ? trigger.events : [];
+  const firstService = getEventService(events[0]);
+  const scenario = String(firstService.scenario ?? '').trim();
+  const status = String(getReferenceCode(firstService.status)).trim();
+
+  return [`${events.length} событ.`, scenario, status].filter(Boolean).join(' / ');
+}
+
+function createProcessPlaygroundTriggerHistoryItem(trigger, triggerText) {
+  const createdAt = new Date().toISOString();
+
+  return {
+    id: createProcessPlaygroundHistoryId(),
+    createdAt,
+    title: getProcessPlaygroundTriggerHistoryTitle(trigger),
+    meta: getProcessPlaygroundTriggerHistoryMeta(trigger),
+    savedAtLabel: formatProcessPlaygroundHistoryDate(createdAt),
+    triggerText,
+  };
+}
+
+function normalizeProcessPlaygroundTriggerHistoryItem(item) {
+  const triggerText = typeof item?.triggerText === 'string' ? item.triggerText : '';
+  if (!triggerText.trim()) {
+    return null;
+  }
+
+  let parsedTrigger = null;
+  try {
+    parsedTrigger = JSON.parse(triggerText);
+  } catch {
+    // A malformed historical item can still be inserted and edited by the user.
+  }
+
+  const createdAt = typeof item.createdAt === 'string' ? item.createdAt : new Date().toISOString();
+
+  return {
+    id: typeof item.id === 'string' ? item.id : createProcessPlaygroundHistoryId(),
+    createdAt,
+    title: item.title || getProcessPlaygroundTriggerHistoryTitle(parsedTrigger),
+    meta: item.meta || getProcessPlaygroundTriggerHistoryMeta(parsedTrigger),
+    savedAtLabel: formatProcessPlaygroundHistoryDate(createdAt),
+    triggerText,
+  };
+}
+
+function readProcessPlaygroundTriggerHistory() {
+  if (typeof window === 'undefined') {
+    return [];
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(PROCESS_PLAYGROUND_TRIGGER_HISTORY_KEY);
+    const parsedValue = rawValue ? JSON.parse(rawValue) : [];
+
+    return Array.isArray(parsedValue)
+      ? parsedValue
+          .map(normalizeProcessPlaygroundTriggerHistoryItem)
+          .filter(Boolean)
+          .slice(0, PROCESS_PLAYGROUND_TRIGGER_HISTORY_LIMIT)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeProcessPlaygroundTriggerHistory(items) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    const payload = (items ?? []).map(({ id, createdAt, title, meta, triggerText }) => ({
+      id,
+      createdAt,
+      title,
+      meta,
+      triggerText,
+    }));
+
+    if (payload.length === 0) {
+      window.localStorage.removeItem(PROCESS_PLAYGROUND_TRIGGER_HISTORY_KEY);
+      return;
+    }
+
+    window.localStorage.setItem(PROCESS_PLAYGROUND_TRIGGER_HISTORY_KEY, JSON.stringify(payload));
+  } catch {
+    // localStorage can be unavailable in private mode; history is best-effort.
+  }
+}
+
+function upsertProcessPlaygroundTriggerHistoryItem(items, trigger, triggerText) {
+  const normalizedTriggerText = triggerText.trim();
+  const nextItem = createProcessPlaygroundTriggerHistoryItem(trigger, normalizedTriggerText);
+  const currentItems = (items ?? [])
+    .map(normalizeProcessPlaygroundTriggerHistoryItem)
+    .filter(Boolean)
+    .filter((item) => item.triggerText.trim() !== normalizedTriggerText);
+
+  return [nextItem, ...currentItems].slice(0, PROCESS_PLAYGROUND_TRIGGER_HISTORY_LIMIT);
+}
+
+function parseJsonLogicRule(ruleText, label) {
+  const rawRule = String(ruleText ?? '').trim();
+  if (!rawRule) {
+    return null;
+  }
+
+  try {
+    const parsedRule = JSON.parse(rawRule);
+    return isEmptyJsonValue(parsedRule) ? null : parsedRule;
+  } catch {
+    throw new Error(`${label}: правило JsonLogic должно быть валидным JSON.`);
+  }
+}
+
+function parseRegexpPattern(pattern) {
+  const normalizedPattern = String(pattern ?? '').trim();
+  const slashRegexp = normalizedPattern.match(/^\/(.+)\/([a-z]*)$/i);
+  if (slashRegexp) {
+    return new RegExp(slashRegexp[1], slashRegexp[2]);
+  }
+
+  return null;
+}
+
+function matchesScenarioPattern(pattern, scenario) {
+  const normalizedPattern = String(pattern ?? '').trim();
+  const normalizedScenario = String(scenario ?? '').trim();
+  if (!normalizedPattern || !normalizedScenario) {
+    return false;
+  }
+
+  if (normalizedPattern === normalizedScenario) {
+    return true;
+  }
+
+  try {
+    const regexp = parseRegexpPattern(normalizedPattern);
+    return regexp ? regexp.test(normalizedScenario) : false;
+  } catch {
+    return false;
+  }
+}
+
+function getProcessPlaygroundLabel(name, comment, fallback) {
+  const title = String(name ?? '').trim() || fallback;
+  const subtitle = String(comment ?? '').trim();
+  return subtitle ? `${title} (${subtitle})` : title;
+}
+
+function getOutputPlaygroundLabel(output) {
+  const phase = output?.phase?.code || output?.phase || '';
+  return phase || output?.name || 'output';
+}
+
+async function evaluateJsonLogicBoolean(rule, data) {
+  const response = await fetch('/api/json-logic/evaluate', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      data,
+      rule,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(errorText || `HTTP ${response.status}`);
+  }
+
+  const payload = await response.json();
+  return payload?.result === true;
+}
+
+async function buildProcessPlaygroundResult(processConfigs, trigger) {
+  const events = Array.isArray(trigger?.events) ? trigger.events : [];
+  const result = {
+    eventCount: events.length,
+    processCount: 0,
+    subprocessCount: 0,
+    stageCount: 0,
+    scenarioCount: 0,
+    reverseCount: 0,
+    outputCount: 0,
+    processes: [],
+  };
+
+  for (const processConfig of processConfigs ?? []) {
+    const process = processConfig?.process;
+    if (!process || process.disabled) {
+      continue;
+    }
+
+    const processNodeId = process.id ? `process:${process.id}` : null;
+    const processMatch = {
+      id: process.id ?? processConfig.id,
+      processConfigId: processConfig.id,
+      nodeId: processNodeId,
+      expandedNodeIds: [processNodeId].filter(Boolean),
+      label: getProcessPlaygroundLabel(process.nodeName, process.nodeComment, process.contextCode?.code || 'process'),
+      subprocesses: [],
+    };
+
+    for (const subprocess of process.subprocess ?? []) {
+      if (subprocess.disabled) {
+        continue;
+      }
+
+      const triggerRule = parseJsonLogicRule(
+        subprocess.trigger?.rule,
+        `${processMatch.label} / ${subprocess.nodeName || 'subprocess'} / trigger.rule`,
+      );
+      if (!triggerRule) {
+        continue;
+      }
+
+      const subprocessMatches = await evaluateJsonLogicBoolean(triggerRule, trigger);
+      if (!subprocessMatches) {
+        continue;
+      }
+
+      const subprocessNodeId = subprocess.id ? `subprocess:${subprocess.id}` : null;
+      const subprocessMatch = {
+        id: subprocess.id,
+        nodeId: subprocessNodeId,
+        expandedNodeIds: [processNodeId].filter(Boolean),
+        label: getProcessPlaygroundLabel(subprocess.nodeName, subprocess.nodeComment, 'subprocess'),
+        stages: [],
+      };
+
+      for (const stage of subprocess.stages ?? []) {
+        const configurator = stage.configurator;
+        if (!configurator || configurator.disabled) {
+          continue;
+        }
+
+        const filterRule = parseJsonLogicRule(
+          configurator.filterEventRule,
+          `${processMatch.label} / ${subprocessMatch.label} / ${stage.nodeName || 'stage'} / filter-event-rule`,
+        );
+        if (!filterRule) {
+          continue;
+        }
+
+        const stageEvents = [];
+        if (configurator.multiple) {
+          const stageMatches = await evaluateJsonLogicBoolean(filterRule, trigger);
+          if (stageMatches) {
+            stageEvents.push(...events);
+          }
+        } else {
+          for (const event of events) {
+            if (await evaluateJsonLogicBoolean(filterRule, event)) {
+              stageEvents.push(event);
+            }
+          }
+        }
+
+        if (stageEvents.length === 0) {
+          continue;
+        }
+
+        const stageNodeId = stage.id ? `stage:${stage.id}` : null;
+        const stageMatch = {
+          id: stage.id,
+          nodeId: stageNodeId,
+          expandedNodeIds: [processNodeId, subprocessNodeId].filter(Boolean),
+          label: getProcessPlaygroundLabel(stage.nodeName, stage.nodeComment, 'stage'),
+          eventCount: stageEvents.length,
+          scenarios: [],
+        };
+
+        for (const [resultIndex, resultItem] of (configurator.result ?? []).entries()) {
+          const resultNodeId = getResultNodeId(stage.id, resultIndex);
+          for (const scenarioPattern of sanitizeInputScenarios(resultItem.inputScenarios)) {
+            const scenarioEvents = stageEvents.filter((event) =>
+              matchesScenarioPattern(scenarioPattern, getEventService(event).scenario),
+            );
+            if (scenarioEvents.length === 0) {
+              continue;
+            }
+
+            const scenarioMatch = {
+              id: `${resultItem.id ?? 'result'}:${scenarioPattern}`,
+              nodeId: resultNodeId,
+              expandedNodeIds: [processNodeId, subprocessNodeId, stageNodeId].filter(Boolean),
+              label: scenarioPattern,
+              eventCount: scenarioEvents.length,
+              statuses: [],
+            };
+
+            for (const [reverseIndex, reverse] of (resultItem.reverse ?? []).entries()) {
+              const statusCode = getReferenceCode(reverse.status);
+              const reverseEvents = scenarioEvents.filter((event) => getReferenceCode(getEventService(event).status) === statusCode);
+              if (reverseEvents.length === 0) {
+                continue;
+              }
+
+              const reverseNodeId = getReverseNodeId(stage.id, resultIndex, reverseIndex);
+              const statusMatch = {
+                id: reverse.id,
+                nodeId: reverseNodeId,
+                expandedNodeIds: [processNodeId, subprocessNodeId, stageNodeId, resultNodeId].filter(Boolean),
+                label: statusCode || 'STATUS не задан',
+                eventCount: reverseEvents.length,
+                outputs: [],
+              };
+
+              for (const [outputIndex, output] of (reverse.output ?? []).entries()) {
+                const outputRule = parseJsonLogicRule(
+                  output.rule,
+                  `${processMatch.label} / ${subprocessMatch.label} / ${stageMatch.label} / ${scenarioPattern} / ${statusMatch.label} / ${getOutputPlaygroundLabel(output)} / output.rule`,
+                );
+                const outputEvents = outputRule
+                  ? []
+                  : [...reverseEvents];
+
+                if (outputRule) {
+                  for (const event of reverseEvents) {
+                    if (await evaluateJsonLogicBoolean(outputRule, event)) {
+                      outputEvents.push(event);
+                    }
+                  }
+                }
+
+                if (outputEvents.length === 0) {
+                  continue;
+                }
+
+                statusMatch.outputs.push({
+                  id: output.id ?? `${statusMatch.id ?? statusMatch.label}:${getOutputPlaygroundLabel(output)}`,
+                  nodeId: getReverseOutputNodeId(stage.id, resultIndex, reverseIndex, outputIndex),
+                  expandedNodeIds: [processNodeId, subprocessNodeId, stageNodeId, resultNodeId, reverseNodeId].filter(Boolean),
+                  label: getOutputPlaygroundLabel(output),
+                  eventCount: outputEvents.length,
+                  autoMatched: !outputRule,
+                });
+              }
+
+              scenarioMatch.statuses.push(statusMatch);
+            }
+
+            stageMatch.scenarios.push(scenarioMatch);
+          }
+        }
+
+        subprocessMatch.stages.push(stageMatch);
+      }
+
+      processMatch.subprocesses.push(subprocessMatch);
+    }
+
+    if (processMatch.subprocesses.length > 0) {
+      result.processes.push(processMatch);
+    }
+  }
+
+  result.processCount = result.processes.length;
+  result.subprocessCount = result.processes.reduce((sum, process) => sum + process.subprocesses.length, 0);
+  result.stageCount = result.processes.reduce(
+    (processSum, process) =>
+      processSum + process.subprocesses.reduce((subprocessSum, subprocess) => subprocessSum + subprocess.stages.length, 0),
+    0,
+  );
+  result.scenarioCount = result.processes.reduce(
+    (processSum, process) =>
+      processSum +
+      process.subprocesses.reduce(
+        (subprocessSum, subprocess) =>
+          subprocessSum + subprocess.stages.reduce((stageSum, stage) => stageSum + stage.scenarios.length, 0),
+        0,
+      ),
+    0,
+  );
+  result.reverseCount = result.processes.reduce(
+    (processSum, process) =>
+      processSum +
+      process.subprocesses.reduce(
+        (subprocessSum, subprocess) =>
+          subprocessSum +
+          subprocess.stages.reduce(
+            (stageSum, stage) => stageSum + stage.scenarios.reduce((scenarioSum, scenario) => scenarioSum + scenario.statuses.length, 0),
+            0,
+          ),
+        0,
+      ),
+    0,
+  );
+  result.outputCount = result.processes.reduce(
+    (processSum, process) =>
+      processSum +
+      process.subprocesses.reduce(
+        (subprocessSum, subprocess) =>
+          subprocessSum +
+          subprocess.stages.reduce(
+            (stageSum, stage) =>
+              stageSum +
+              stage.scenarios.reduce(
+                (scenarioSum, scenario) =>
+                  scenarioSum + scenario.statuses.reduce((statusSum, status) => statusSum + status.outputs.length, 0),
+                0,
+              ),
+            0,
+          ),
+        0,
+      ),
+    0,
+  );
+
+  return result;
+}
+
 const NODE_NAME_HELPER_TEXT = 'Название узла нужно для визуальной идентификации на схеме и в редакторе.';
 const NODE_COMMENT_HELPER_TEXT = 'Описание узла помогает понять его назначение и отображается в карточке узла.';
 
@@ -560,6 +1114,29 @@ function getDefaultExpandedNodeIds(processConfig) {
   });
 
   return expandedNodeIds;
+}
+
+function findProcessPlaygroundNodeTarget(processConfigs, target) {
+  const targetNodeId = String(target?.nodeId ?? '');
+  if (!targetNodeId) {
+    return null;
+  }
+
+  const candidates = target?.processConfigId
+    ? (processConfigs ?? []).filter((processConfig) => String(processConfig.id) === String(target.processConfigId))
+    : (processConfigs ?? []);
+
+  for (const processConfig of candidates) {
+    if (findSelectedNode(processConfig, targetNodeId)) {
+      return {
+        processConfigId: processConfig.id,
+        nodeId: targetNodeId,
+        expandedNodeIds: target?.expandedNodeIds ?? [],
+      };
+    }
+  }
+
+  return null;
 }
 
 function createDefaultSubprocess(index) {
@@ -2819,11 +3396,13 @@ function NodeOrderEditor({ processConfig, selectedNodeId, onReorderStages, onReo
 function ProcessCodeManagerModal({
   isOpen,
   codes,
+  codeUsage = new Map(),
   isSubmitting,
   errorMessage,
   onClose,
   onCreate,
   onRename,
+  onDelete,
 }) {
   const [newCode, setNewCode] = useState('');
   const [draftCodes, setDraftCodes] = useState({});
@@ -2893,6 +3472,17 @@ function ProcessCodeManagerModal({
     await onRename(currentCode, nextCode);
   };
 
+  const handleDelete = async (code) => {
+    const usage = codeUsage.get(code);
+    if (usage?.totalCount > 0) {
+      setLocalError(`Код процесса "${code}" нельзя удалить. ${formatProcessCodeUsage(usage)}.`);
+      return;
+    }
+
+    setLocalError('');
+    await onDelete(code);
+  };
+
   return (
     <div className="modal-shell" role="dialog" aria-modal="true" aria-labelledby="process-code-manager-title">
       <div className="modal-shell__backdrop" onClick={isSubmitting ? undefined : onClose} />
@@ -2903,7 +3493,7 @@ function ProcessCodeManagerModal({
               Код процесса
             </Title>
             <Text component="small" className="modal-card__subtitle">
-              Создавайте и переименовывайте значения справочника contextCodesDictionaryList.
+              Создавайте, переименовывайте и удаляйте неиспользуемые значения справочника contextCodesDictionaryList.
             </Text>
           </div>
           <button
@@ -2938,6 +3528,9 @@ function ProcessCodeManagerModal({
               const draftValue = draftCodes[code] ?? code;
               const normalizedDraftValue = normalizeProcessCode(draftValue);
               const isChanged = normalizedDraftValue !== code;
+              const usage = codeUsage.get(code);
+              const isUsed = Boolean(usage?.totalCount);
+              const usageLabel = formatProcessCodeUsage(usage);
 
               return (
                 <div key={code} className="process-code-manager__row">
@@ -2952,12 +3545,30 @@ function ProcessCodeManagerModal({
                     maxLength={CONTEXT_CODE_MAX_LENGTH}
                     aria-label={`Код процесса ${code}`}
                   />
+                  <span
+                    className={cn(
+                      'process-code-manager__usage',
+                      !isUsed && 'process-code-manager__usage--free',
+                    )}
+                  >
+                    {usageLabel}
+                  </span>
                   <Button
                     variant="secondary"
                     onClick={() => handleRename(code)}
                     isDisabled={isSubmitting || !isChanged || !normalizedDraftValue}
                   >
                     Сохранить
+                  </Button>
+                  <Button
+                    variant="plain"
+                    className="process-code-manager__delete"
+                    onClick={() => handleDelete(code)}
+                    isDisabled={isSubmitting || isUsed}
+                    aria-label={`Удалить код процесса ${code}`}
+                    title={isUsed ? usageLabel : `Удалить код процесса ${code}`}
+                  >
+                    <Trash01 aria-hidden size={16} />
                   </Button>
                 </div>
               );
@@ -2986,6 +3597,9 @@ export function App() {
     fetchPolicy: 'no-cache',
   });
   const [renameContextCode, renameContextCodeState] = useMutation(RENAME_CONTEXT_CODE, {
+    fetchPolicy: 'no-cache',
+  });
+  const [deleteContextCode, deleteContextCodeState] = useMutation(DELETE_CONTEXT_CODE, {
     fetchPolicy: 'no-cache',
   });
   const [updateProcess, updateState] = useMutation(UPDATE_PROCESS, {
@@ -3057,6 +3671,7 @@ export function App() {
   const [viewerNodeId, setViewerNodeId] = useState(null);
   const [orderNodeId, setOrderNodeId] = useState(null);
   const [expandedNodeIds, setExpandedNodeIds] = useState([]);
+  const [topologyFocusRequest, setTopologyFocusRequest] = useState(null);
   const [createErrorMessage, setCreateErrorMessage] = useState('');
   const [updateErrorMessage, setUpdateErrorMessage] = useState('');
   const [exportErrorMessage, setExportErrorMessage] = useState('');
@@ -3088,6 +3703,12 @@ export function App() {
   const [jsonLogicPlaygroundResult, setJsonLogicPlaygroundResult] = useState('');
   const [jsonLogicPlaygroundError, setJsonLogicPlaygroundError] = useState('');
   const [isEvaluatingJsonLogic, setIsEvaluatingJsonLogic] = useState(false);
+  const [isProcessPlaygroundOpen, setIsProcessPlaygroundOpen] = useState(false);
+  const [processPlaygroundTrigger, setProcessPlaygroundTrigger] = useState(DEFAULT_PROCESS_PLAYGROUND_TRIGGER);
+  const [processPlaygroundResult, setProcessPlaygroundResult] = useState(null);
+  const [processPlaygroundError, setProcessPlaygroundError] = useState('');
+  const [processPlaygroundTriggerHistory, setProcessPlaygroundTriggerHistory] = useState([]);
+  const [isEvaluatingProcessPlayground, setIsEvaluatingProcessPlayground] = useState(false);
   const [autosaveStatus, setAutosaveStatus] = useState(null);
   const nodeEditorRef = useRef(null);
   const manualEditorSaveInFlightRef = useRef(false);
@@ -3099,7 +3720,8 @@ export function App() {
   const slaDurationUnitOptions = (data?.slaDurationUnitDictionaryList ?? []).map((item) => item.code).filter(Boolean);
   const slaStatusOptions = (data?.slaStatusDictionaryList ?? []).map((item) => item.code).filter(Boolean);
   const processCodeOptions = (data?.contextCodesDictionaryList ?? []).map((item) => item.code).filter(Boolean);
-  const isProcessCodeManagerSubmitting = createContextCodeState.loading || renameContextCodeState.loading;
+  const isProcessCodeManagerSubmitting =
+    createContextCodeState.loading || renameContextCodeState.loading || deleteContextCodeState.loading;
   const processConfigOptions = processConfigs.map((item) => {
     const processName = item.process?.nodeName?.trim() || item.process?.contextCode?.code?.trim() || 'Process';
 
@@ -3140,6 +3762,13 @@ export function App() {
     activeProcessConfig && editorNodeId && editorPreview?.nodeId === editorNodeId
       ? updateSelectedNode(activeProcessConfig, editorNodeId, editorPreview.values)
       : activeProcessConfig;
+  const processCodeUsage = buildProcessCodeUsage(
+    workingProcessConfig?.id
+      ? processConfigs.map((processConfig) =>
+          processConfig.id === workingProcessConfig.id ? workingProcessConfig : processConfig,
+        )
+      : processConfigs,
+  );
   const hasYamlEditorChanges = yamlEditorText !== yamlEditorBaseline;
   const yamlEditorStatus = isYamlEditorLoading
     ? 'Загрузка...'
@@ -3314,6 +3943,10 @@ export function App() {
   };
 
   useEffect(() => {
+    setProcessPlaygroundTriggerHistory(readProcessPlaygroundTriggerHistory());
+  }, []);
+
+  useEffect(() => {
     if (createErrorMessage) {
       showErrorToast(createErrorMessage);
     }
@@ -3411,6 +4044,46 @@ export function App() {
       return true;
     } catch (mutationError) {
       setProcessCodeManagerError(getErrorMessage(mutationError, 'Не удалось обновить код процесса.'));
+      return false;
+    }
+  };
+
+  const handleDeleteProcessCode = async (rawCode) => {
+    const code = normalizeProcessCode(rawCode);
+    if (!code) {
+      setProcessCodeManagerError('Код процесса не должен быть пустым.');
+      return false;
+    }
+
+    if (!processCodeOptions.includes(code)) {
+      setProcessCodeManagerError(`Код процесса "${code}" не найден.`);
+      return false;
+    }
+
+    const usage = processCodeUsage.get(code);
+    if (usage?.totalCount > 0) {
+      setProcessCodeManagerError(`Код процесса "${code}" нельзя удалить. ${formatProcessCodeUsage(usage)}.`);
+      return false;
+    }
+
+    const shouldDelete = window.confirm(`Удалить код процесса "${code}"?`);
+    if (!shouldDelete) {
+      return false;
+    }
+
+    try {
+      setProcessCodeManagerError('');
+      await deleteContextCode({
+        variables: { id: code },
+      });
+      setLocalProcessConfig(null);
+      setEditorPreview(null);
+      setAutosaveStatus(null);
+      await refetch();
+      showSuccessToast('Код процесса удален', `Код "${code}" удален из справочника.`);
+      return true;
+    } catch (mutationError) {
+      setProcessCodeManagerError(getErrorMessage(mutationError, 'Не удалось удалить код процесса.'));
       return false;
     }
   };
@@ -3755,6 +4428,14 @@ export function App() {
     setExpandedNodeIds((current) =>
       current.includes(nodeId) ? current.filter((item) => item !== nodeId) : [...current, nodeId],
     );
+  };
+
+  const handleExpandAllNodes = () => {
+    setExpandedNodeIds(getDefaultExpandedNodeIds(workingProcessConfig));
+  };
+
+  const handleCollapseAllNodes = () => {
+    setExpandedNodeIds([]);
   };
 
   const handleEditNode = (nodeId) => {
@@ -4271,15 +4952,34 @@ export function App() {
     setJsonLogicPlaygroundError('');
   };
 
+  const handleOpenProcessPlayground = () => {
+    setProcessPlaygroundError('');
+    setProcessPlaygroundResult(null);
+    setProcessPlaygroundTrigger((current) => formatJsonSnippet(current || DEFAULT_PROCESS_PLAYGROUND_TRIGGER));
+    setIsProcessPlaygroundOpen(true);
+  };
+
+  const handleCloseProcessPlayground = () => {
+    if (isEvaluatingProcessPlayground) {
+      return;
+    }
+
+    setIsProcessPlaygroundOpen(false);
+    setProcessPlaygroundError('');
+  };
+
   const handleImportFilesSelected = (files) => {
     setImportErrorMessage('');
+    const yamlFiles = files.filter((file) => /\.ya?ml$/i.test(file.name));
+
+    if (files.length > 0 && yamlFiles.length === 0) {
+      setImportErrorMessage('В выбранных файлах не найдено YAML-конфигураций с расширением .yaml или .yml.');
+      return;
+    }
+
     setImportFiles((current) => {
-      const nextByKey = new Map(
-        current.map((file) => [`${file.name}:${file.size}:${file.lastModified}`, file]),
-      );
-      files
-        .filter((file) => /\.ya?ml$/i.test(file.name))
-        .forEach((file) => nextByKey.set(`${file.name}:${file.size}:${file.lastModified}`, file));
+      const nextByKey = new Map(current.map((file) => [getImportFileKey(file), file]));
+      yamlFiles.forEach((file) => nextByKey.set(getImportFileKey(file), file));
       return Array.from(nextByKey.values());
     });
   };
@@ -4324,6 +5024,90 @@ export function App() {
     }
   };
 
+  const handleEvaluateProcessPlayground = async () => {
+    try {
+      setProcessPlaygroundError('');
+      setIsEvaluatingProcessPlayground(true);
+
+      const parsedTrigger = JSON.parse(processPlaygroundTrigger || '{}');
+      if (!Array.isArray(parsedTrigger.events)) {
+        throw new Error('Trigger должен содержать массив events.');
+      }
+
+      const normalizedTriggerText = stringifyJsonForEditor(parsedTrigger);
+      const playgroundProcessConfigs = (processConfigs ?? []).map((processConfig) =>
+        workingProcessConfig?.id && processConfig.id === workingProcessConfig.id ? workingProcessConfig : processConfig,
+      );
+      const playgroundResult = await buildProcessPlaygroundResult(playgroundProcessConfigs, parsedTrigger);
+      setProcessPlaygroundTrigger(normalizedTriggerText);
+      setProcessPlaygroundResult(playgroundResult);
+      setProcessPlaygroundTriggerHistory((current) => {
+        const next = upsertProcessPlaygroundTriggerHistoryItem(current, parsedTrigger, normalizedTriggerText);
+        writeProcessPlaygroundTriggerHistory(next);
+        return next;
+      });
+    } catch (requestError) {
+      setProcessPlaygroundError(getErrorMessage(requestError, 'Не удалось проиграть процессы.'));
+      setProcessPlaygroundResult(null);
+    } finally {
+      setIsEvaluatingProcessPlayground(false);
+    }
+  };
+
+  const handleSelectProcessPlaygroundTriggerHistoryItem = (item) => {
+    if (!item?.triggerText) {
+      return;
+    }
+
+    setProcessPlaygroundTrigger(item.triggerText);
+    setProcessPlaygroundResult(null);
+    setProcessPlaygroundError('');
+  };
+
+  const handleClearProcessPlaygroundTriggerHistory = () => {
+    setProcessPlaygroundTriggerHistory([]);
+    writeProcessPlaygroundTriggerHistory([]);
+  };
+
+  const handleSelectProcessPlaygroundNode = (targetNode) => {
+    const playgroundProcessConfigs = (processConfigs ?? []).map((processConfig) =>
+      workingProcessConfig?.id && processConfig.id === workingProcessConfig.id ? workingProcessConfig : processConfig,
+    );
+    const target = findProcessPlaygroundNodeTarget(playgroundProcessConfigs, targetNode);
+
+    if (!target) {
+      setProcessPlaygroundError('Не удалось найти node в React Flow.');
+      return;
+    }
+
+    if (processEditorMode === 'YAML' && hasYamlEditorChanges) {
+      const shouldSwitch = window.confirm('Есть несохраненные изменения YAML. Перейти к node в React Flow без сохранения?');
+      if (!shouldSwitch) {
+        return;
+      }
+      setYamlEditorText(yamlEditorBaseline);
+      setYamlEditorError('');
+    }
+
+    setProcessPlaygroundError('');
+    setProcessEditorMode('VISUAL');
+    setSelectedConfigId(target.processConfigId);
+    setSelectedNodeId(target.nodeId);
+    setEditorNodeId(null);
+    setViewerNodeId(null);
+    setOrderNodeId(null);
+    setEditorPreview(null);
+    setAutosaveStatus(null);
+    setIsEditorOpen(false);
+    setExpandedNodeIds((current) => {
+      const next = new Set(current);
+      target.expandedNodeIds.forEach((nodeId) => next.add(nodeId));
+      return Array.from(next);
+    });
+    setTopologyFocusRequest({ id: Date.now(), nodeId: target.nodeId });
+    setIsProcessPlaygroundOpen(false);
+  };
+
   const handleImportProcessConfigs = async () => {
     if (importFiles.length === 0 || isImportingProcessConfig) {
       return;
@@ -4335,7 +5119,7 @@ export function App() {
 
       const formData = new FormData();
       importFiles.forEach((file) => {
-        formData.append('files', file);
+        formData.append('files', file, getImportFilePath(file));
       });
 
       const response = await fetch('/api/process-configs/import', {
@@ -4541,6 +5325,8 @@ export function App() {
               selectedNodeId={selectedNodeId}
               expandedNodeIds={expandedNodeIds}
               onToggleNode={handleToggleNode}
+              onExpandAllNodes={handleExpandAllNodes}
+              onCollapseAllNodes={handleCollapseAllNodes}
               onEditNode={handleEditNode}
               onViewNode={handleViewNode}
               onReorderSubprocessNode={handleReorderSubprocessNode}
@@ -4554,6 +5340,8 @@ export function App() {
               onImportProcessConfig={handleOpenImportModal}
               onExportProcessConfig={handleOpenExportModal}
               onOpenJsonLogicPlayground={handleOpenStandaloneJsonLogicPlayground}
+              onOpenProcessPlayground={handleOpenProcessPlayground}
+              focusRequest={topologyFocusRequest}
               onSelectProcessConfig={handleSelectProcessConfig}
               editorMode={processEditorMode}
               onEditorModeChange={handleProcessEditorModeChange}
@@ -4726,14 +5514,30 @@ export function App() {
             onRuleChange={setJsonLogicPlaygroundRule}
             onEvaluate={handleEvaluateJsonLogic}
           />
+          <ProcessPlaygroundModal
+            isOpen={isProcessPlaygroundOpen}
+            triggerText={processPlaygroundTrigger}
+            triggerHistory={processPlaygroundTriggerHistory}
+            result={processPlaygroundResult}
+            isSubmitting={isEvaluatingProcessPlayground}
+            errorMessage={processPlaygroundError}
+            onClose={handleCloseProcessPlayground}
+            onTriggerChange={setProcessPlaygroundTrigger}
+            onEvaluate={handleEvaluateProcessPlayground}
+            onSelectTriggerHistoryItem={handleSelectProcessPlaygroundTriggerHistoryItem}
+            onClearTriggerHistory={handleClearProcessPlaygroundTriggerHistory}
+            onSelectNode={handleSelectProcessPlaygroundNode}
+          />
           <ProcessCodeManagerModal
             isOpen={isProcessCodeManagerOpen}
             codes={processCodeOptions}
+            codeUsage={processCodeUsage}
             isSubmitting={isProcessCodeManagerSubmitting}
             errorMessage={processCodeManagerError}
             onClose={handleCloseProcessCodeManager}
             onCreate={handleCreateProcessCode}
             onRename={handleRenameProcessCode}
+            onDelete={handleDeleteProcessCode}
           />
           {toast && <Toast title={toast.title} message={toast.message} variant={toast.variant} onClose={() => setToast(null)} />}
         </div>

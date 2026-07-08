@@ -21,6 +21,7 @@ import jakarta.persistence.EntityManager
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -75,6 +76,7 @@ class JpaGraphQlSupportTest {
         assertTrue(schema.mutationType.fieldDefinitions.any { it.name == "updateReverseOutputNode" })
         assertTrue(schema.mutationType.fieldDefinitions.any { it.name == "deleteReverseOutputNode" })
         assertTrue(schema.mutationType.fieldDefinitions.any { it.name == "renameContextCodesDictionary" })
+        assertTrue(schema.mutationType.fieldDefinitions.any { it.name == "deleteContextCodesDictionary" })
         assertNotNull(schema.getType("Parent"))
         assertNotNull(schema.getType("ParentInput"))
 
@@ -343,5 +345,44 @@ class JpaGraphQlSupportTest {
         assertEquals("NEW_UI_CODE", persistedProcess.contextCode?.code)
         assertEquals("NEW_UI_CODE", persistedStage.contextCode?.code)
         assertNull(entityManager.find(ContextCodesDictionary::class.java, "OLD_UI_CODE"))
+    }
+
+    @Test
+    @Transactional
+    fun `deletes unused context code dictionary`() {
+        val code = ContextCodesDictionary(code = "UNUSED_UI_CODE")
+        entityManager.persist(code)
+        entityManager.flush()
+
+        val deleted = crudService.delete(registry.entity(ContextCodesDictionary::class.java), "UNUSED_UI_CODE")
+
+        assertTrue(deleted)
+        entityManager.flush()
+        entityManager.clear()
+        assertNull(entityManager.find(ContextCodesDictionary::class.java, "UNUSED_UI_CODE"))
+    }
+
+    @Test
+    @Transactional
+    fun `does not delete context code dictionary while process or stage uses it`() {
+        val usedCode = ContextCodesDictionary(code = "USED_UI_CODE")
+        entityManager.persist(usedCode)
+        val processConfig = ProcessConfig()
+        val process = Process(processConfig = processConfig, contextCode = usedCode)
+        val subprocess = Subprocess(process = process)
+        val stage = Stage(subprocess = subprocess, executor = "executor.alpha", contextCode = usedCode)
+        val configurator = Configurator(stage = stage)
+        processConfig.process = process
+        process.subprocess = mutableListOf(subprocess)
+        subprocess.stages = mutableListOf(stage)
+        stage.configurator = configurator
+        entityManager.persist(processConfig)
+        entityManager.flush()
+
+        val exception = assertThrows(IllegalArgumentException::class.java) {
+            crudService.delete(registry.entity(ContextCodesDictionary::class.java), "USED_UI_CODE")
+        }
+
+        assertTrue(exception.message?.contains("используется") == true)
     }
 }

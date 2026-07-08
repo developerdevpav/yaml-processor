@@ -559,11 +559,47 @@ class JpaGraphQlCrudService(
 
     @Transactional
     fun delete(entity: EntityMetadata, id: Any?): Boolean {
+        if (entity.javaType == ContextCodesDictionary::class.java) {
+            return deleteContextCodesDictionary(id)
+        }
+
         val managed = entityManager.find(entity.javaType, convertId(id, entity.idJavaType)) ?: return false
         entityManager.remove(managed)
         entityManager.flush()
         return true
     }
+
+    private fun deleteContextCodesDictionary(id: Any?): Boolean {
+        val code = id?.toString()?.trim().orEmpty()
+        require(code.isNotBlank()) { "Context code id must not be blank" }
+
+        val current = entityManager.find(ContextCodesDictionary::class.java, code) ?: return false
+        val processUsageCount = countContextCodeProcessUsage(code)
+        val stageUsageCount = countContextCodeStageUsage(code)
+        require(processUsageCount == 0L && stageUsageCount == 0L) {
+            "Код процесса \"$code\" используется: процессов $processUsageCount, стадий $stageUsageCount."
+        }
+
+        entityManager.remove(current)
+        entityManager.flush()
+        return true
+    }
+
+    private fun countContextCodeProcessUsage(code: String): Long =
+        entityManager.createQuery(
+            "select count(p) from Process p where p.contextCode.code = :code",
+            java.lang.Long::class.java
+        )
+            .setParameter("code", code)
+            .singleResult.toLong()
+
+    private fun countContextCodeStageUsage(code: String): Long =
+        entityManager.createQuery(
+            "select count(s) from Stage s where s.contextCode.code = :code",
+            java.lang.Long::class.java
+        )
+            .setParameter("code", code)
+            .singleResult.toLong()
 
     @Transactional
     fun renameContextCodesDictionary(id: Any?, code: String): ContextCodesDictionary {

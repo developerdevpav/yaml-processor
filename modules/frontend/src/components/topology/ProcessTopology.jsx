@@ -1,8 +1,22 @@
-import { BellRinging04, CheckVerified02, Edit01, Eye, NotificationBox, Plus, Rows01, Trash01, ZapCircle } from '@untitledui/icons';
+import {
+  BellRinging04,
+  CheckVerified02,
+  Download01,
+  Edit01,
+  Eye,
+  Maximize01,
+  Minimize01,
+  NotificationBox,
+  Plus,
+  Rows01,
+  Trash01,
+  Upload01,
+  ZapCircle,
+} from '@untitledui/icons';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import ReactFlow, { Handle, Position, ReactFlowProvider, useReactFlow } from 'reactflow';
 import { ProcessSelectField } from '../ProcessSelectField';
-import { Button, TopologyActionsMenu } from '../ui/AppPrimitives';
+import { Button, TopologyPlaygroundMenu } from '../ui/AppPrimitives';
 import { cn } from '../../utils/ui';
 
 function truncateText(value, maxLength = 84) {
@@ -167,6 +181,39 @@ function AutoFitView({ processConfig, expandedNodeIds }) {
       });
     });
   }, [expandedNodeIds, processConfig?.id, reactFlow]);
+
+  return null;
+}
+
+function FocusRequestedNode({ focusRequest, nodes }) {
+  const reactFlow = useReactFlow();
+  const nodeId = focusRequest?.nodeId;
+
+  useEffect(() => {
+    if (!nodeId) {
+      return;
+    }
+
+    const graphNode = nodes.find((node) => node.id === nodeId);
+    if (!graphNode) {
+      return;
+    }
+
+    window.requestAnimationFrame(() => {
+      const renderedNode = reactFlow.getNode(nodeId) ?? graphNode;
+      const nodeWidth = renderedNode.width ?? graphNode.style?.width ?? 300;
+      const nodeHeight = renderedNode.height ?? graphNode.data?.nodeHeight ?? 286;
+
+      reactFlow.setCenter(
+        graphNode.position.x + nodeWidth / 2,
+        graphNode.position.y + nodeHeight / 2,
+        {
+          duration: 350,
+          zoom: Math.max(reactFlow.getZoom(), 0.7),
+        },
+      );
+    });
+  }, [focusRequest?.id, nodeId, nodes, reactFlow]);
 
   return null;
 }
@@ -390,6 +437,8 @@ export function ProcessTopology({
   selectedNodeId,
   expandedNodeIds,
   onToggleNode,
+  onExpandAllNodes,
+  onCollapseAllNodes,
   onEditNode,
   onViewNode,
   onReorderSubprocessNode,
@@ -403,6 +452,8 @@ export function ProcessTopology({
   onImportProcessConfig,
   onExportProcessConfig,
   onOpenJsonLogicPlayground,
+  onOpenProcessPlayground,
+  focusRequest,
   onSelectProcessConfig,
   editorMode,
   onEditorModeChange,
@@ -432,50 +483,78 @@ export function ProcessTopology({
   return (
     <div className="topology-layout">
       <div className="topology-toolbar">
-        <div className="topology-toolbar__group">
-          <Button onClick={onCreateProcess} isLoading={isCreating} isDisabled={isCreateDisabled}>
-            Создать процесс
-          </Button>
-          <TopologyActionsMenu
-            onDeleteProcessConfig={onDeleteProcessConfig}
-            onImportProcessConfig={onImportProcessConfig}
-            onExportProcessConfig={onExportProcessConfig}
-            onOpenJsonLogicPlayground={onOpenJsonLogicPlayground}
-            isDeleting={isDeleting}
-            isImporting={isImporting}
-            isExporting={isExporting}
-            canDelete={Boolean(selectedProcessConfigId)}
-            canExport={Boolean(selectedProcessConfigId)}
-          />
-          <Button variant="secondary" onClick={onOpenProcessCodeManager}>
-            Коды процесса
-          </Button>
-          <ProcessSelectField
-            id="topology-process-select"
-            className="topology-toolbar__select"
-            value={selectedProcessConfigId}
-            onChange={onSelectProcessConfig}
-            options={processConfigOptions}
-            placeholder="Выберите процесс"
-            isDisabled={processConfigOptions.length === 0}
-          />
-          <div className="topology-editor-mode" aria-label="Режим редактирования">
-            <button
-              type="button"
-              className={cn('topology-editor-mode__button', editorMode === 'VISUAL' && 'topology-editor-mode__button-active')}
-              onClick={() => onEditorModeChange('VISUAL')}
+        <div className="topology-toolbar__menu">
+          <div className="topology-toolbar__group">
+            <Button onClick={onCreateProcess} isLoading={isCreating} isDisabled={isCreateDisabled}>
+              Создать процесс
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={onImportProcessConfig}
+              isLoading={isImporting}
+              isDisabled={isDeleting || isImporting || isExporting}
             >
-              Chart
-            </button>
-            <button
-              type="button"
-              className={cn('topology-editor-mode__button', editorMode === 'YAML' && 'topology-editor-mode__button-active')}
-              onClick={() => onEditorModeChange('YAML')}
-              disabled={!selectedProcessConfigId}
-            >
-              YAML
-            </button>
+              <Upload01 aria-hidden size={16} />
+              Импортировать
+            </Button>
+            <Button variant="secondary" onClick={onOpenProcessCodeManager}>
+              Коды процесса
+            </Button>
           </div>
+          <div className="topology-toolbar__group topology-toolbar__group--right">
+            <TopologyPlaygroundMenu
+              onOpenJsonLogicPlayground={onOpenJsonLogicPlayground}
+              onOpenProcessPlayground={onOpenProcessPlayground}
+            />
+          </div>
+        </div>
+      </div>
+      <div className="topology-context-menu">
+        <ProcessSelectField
+          id="topology-process-select"
+          className="topology-toolbar__select"
+          value={selectedProcessConfigId}
+          onChange={onSelectProcessConfig}
+          options={processConfigOptions}
+          placeholder="Выберите процесс"
+          isDisabled={processConfigOptions.length === 0}
+        />
+        <Button
+          variant="secondary"
+          className="topology-export-process"
+          onClick={onExportProcessConfig}
+          isLoading={isExporting}
+          isDisabled={!selectedProcessConfigId || isExporting}
+        >
+          <Download01 aria-hidden size={16} />
+          Экспортировать
+        </Button>
+        <Button
+          variant="secondary"
+          className="topology-delete-process"
+          onClick={onDeleteProcessConfig}
+          isLoading={isDeleting}
+          isDisabled={!selectedProcessConfigId || isDeleting}
+        >
+          <Trash01 aria-hidden size={16} />
+          Удалить
+        </Button>
+        <div className="topology-editor-mode" aria-label="Режим редактирования">
+          <button
+            type="button"
+            className={cn('topology-editor-mode__button', editorMode === 'VISUAL' && 'topology-editor-mode__button-active')}
+            onClick={() => onEditorModeChange('VISUAL')}
+          >
+            Chart
+          </button>
+          <button
+            type="button"
+            className={cn('topology-editor-mode__button', editorMode === 'YAML' && 'topology-editor-mode__button-active')}
+            onClick={() => onEditorModeChange('YAML')}
+            disabled={!selectedProcessConfigId}
+          >
+            YAML
+          </button>
         </div>
       </div>
       {editorMode === 'YAML' ? (
@@ -497,6 +576,28 @@ export function ProcessTopology({
       ) : (
         <ReactFlowProvider>
           <div className="topology-canvas">
+            <div className="topology-flow-actions" aria-label="Управление деревом">
+              <button
+                type="button"
+                className="topology-flow-actions__button"
+                onClick={onExpandAllNodes}
+                disabled={!processConfig?.process?.id}
+                aria-label="Раскрыть все дерево"
+                title="Раскрыть все дерево"
+              >
+                <Maximize01 aria-hidden size={18} />
+              </button>
+              <button
+                type="button"
+                className="topology-flow-actions__button"
+                onClick={onCollapseAllNodes}
+                disabled={!processConfig?.process?.id}
+                aria-label="Свернуть все дерево"
+                title="Свернуть все дерево"
+              >
+                <Minimize01 aria-hidden size={18} />
+              </button>
+            </div>
             <ReactFlow
               nodes={graph.nodes.map((node) => ({
                 ...node,
@@ -532,6 +633,7 @@ export function ProcessTopology({
               proOptions={{ hideAttribution: true }}
             >
               <AutoFitView processConfig={processConfig} expandedNodeIds={expandedNodeIds} />
+              <FocusRequestedNode focusRequest={focusRequest} nodes={graph.nodes} />
             </ReactFlow>
           </div>
         </ReactFlowProvider>

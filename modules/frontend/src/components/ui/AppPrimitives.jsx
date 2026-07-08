@@ -1,4 +1,4 @@
-import { AlertCircle, CheckVerified02, File02, Menu04, Plus, XClose } from '@untitledui/icons';
+import { AlertCircle, CheckVerified02, File02, Play, Plus, XClose } from '@untitledui/icons';
 import { Button as AriaButton, Menu, MenuItem, MenuTrigger, Popover } from 'react-aria-components';
 import { ProcessSelectField } from '../ProcessSelectField';
 import { cn, formatJsonSnippet } from '../../utils/ui';
@@ -69,6 +69,7 @@ export function Button({
 }) {
   const variantClassName = {
     primary: 'bg-[#7f56d9] text-white shadow-sm hover:bg-[#6941c6]',
+    success: 'bg-emerald-600 text-white shadow-sm hover:bg-emerald-700',
     secondary: 'bg-white text-slate-700 ring-1 ring-inset ring-slate-300 hover:bg-slate-50',
     link: 'bg-transparent px-0 py-0 text-[#6941c6] hover:text-[#53389e]',
     plain: 'bg-transparent text-slate-500 hover:bg-slate-100 hover:text-slate-700',
@@ -140,66 +141,35 @@ export function YamlActionsMenu({
   );
 }
 
-export function TopologyActionsMenu({
-  onDeleteProcessConfig,
-  onImportProcessConfig,
-  onExportProcessConfig,
+export function TopologyPlaygroundMenu({
   onOpenJsonLogicPlayground,
-  isDeleting = false,
-  isImporting = false,
-  isExporting = false,
-  canDelete = false,
-  canExport = false,
+  onOpenProcessPlayground,
 }) {
-  const isBusy = isDeleting || isImporting || isExporting;
-
   return (
     <MenuTrigger>
       <AriaButton
-        className={cn(
-          'inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-300 transition hover:bg-slate-50',
-          isBusy && 'cursor-not-allowed opacity-60',
-        )}
-        isDisabled={isBusy}
-        aria-label="Действия с процессом"
+        className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700"
+        aria-label="Playground"
       >
-        {isBusy ? (
-          <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-        ) : (
-          <Menu04 aria-hidden size={16} />
-        )}
-        Действия
+        <Play aria-hidden size={16} />
+        Playground
       </AriaButton>
       <Popover
         offset={6}
-        className="z-[360] min-w-[220px] overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-[0_12px_32px_rgba(16,24,40,0.12)] outline-none"
+        className="z-[360] min-w-[180px] overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-[0_12px_32px_rgba(16,24,40,0.12)] outline-none"
       >
         <Menu className="outline-none">
-          <MenuItem
-            onAction={onImportProcessConfig}
-            className="cursor-pointer rounded-lg px-3 py-2 text-sm text-slate-700 outline-none transition hover:bg-slate-50"
-          >
-            Импортировать YAML
-          </MenuItem>
-          <MenuItem
-            onAction={onExportProcessConfig}
-            isDisabled={!canExport}
-            className="cursor-pointer rounded-lg px-3 py-2 text-sm text-slate-700 outline-none transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Экспортировать YAML
-          </MenuItem>
           <MenuItem
             onAction={onOpenJsonLogicPlayground}
             className="cursor-pointer rounded-lg px-3 py-2 text-sm text-slate-700 outline-none transition hover:bg-slate-50"
           >
-            Playground JsonLogic
+            JsonLogic
           </MenuItem>
           <MenuItem
-            onAction={onDeleteProcessConfig}
-            isDisabled={!canDelete}
-            className="cursor-pointer rounded-lg px-3 py-2 text-sm text-rose-600 outline-none transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+            onAction={onOpenProcessPlayground}
+            className="cursor-pointer rounded-lg px-3 py-2 text-sm text-slate-700 outline-none transition hover:bg-slate-50"
           >
-            Удалить процесс
+            Процесс
           </MenuItem>
         </Menu>
       </Popover>
