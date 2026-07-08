@@ -118,7 +118,7 @@ export function YamlActionsMenu({
       </AriaButton>
       <Popover
         offset={6}
-        className="min-w-[220px] overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-[0_12px_32px_rgba(16,24,40,0.12)] outline-none"
+        className="z-[360] min-w-[220px] overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-[0_12px_32px_rgba(16,24,40,0.12)] outline-none"
       >
         <Menu className="outline-none">
           <MenuItem
@@ -172,7 +172,7 @@ export function TopologyActionsMenu({
       </AriaButton>
       <Popover
         offset={6}
-        className="min-w-[220px] overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-[0_12px_32px_rgba(16,24,40,0.12)] outline-none"
+        className="z-[360] min-w-[220px] overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-[0_12px_32px_rgba(16,24,40,0.12)] outline-none"
       >
         <Menu className="outline-none">
           <MenuItem
@@ -230,7 +230,7 @@ export function EmptyState({ children }) {
 }
 
 export function EmptyStateBody({ children }) {
-  return <p className="mt-2 max-w-md text-sm text-slate-500">{children}</p>;
+  return <p className="mx-auto mt-2 max-w-md text-center text-sm text-slate-500">{children}</p>;
 }
 
 export function EmptyStateFooter({ children }) {
@@ -266,7 +266,7 @@ export function StaticJsonField({ label, value, className = '' }) {
   );
 }
 
-export function Title({ children, headingLevel = 'h2', className = '' }) {
+export function Title({ children, headingLevel = 'h2', className = '', ...props }) {
   const Component = headingLevel;
   const levelClassName = {
     h1: 'text-5xl font-semibold tracking-[-0.04em] text-slate-900',
@@ -276,7 +276,7 @@ export function Title({ children, headingLevel = 'h2', className = '' }) {
     h6: 'text-sm font-semibold uppercase tracking-[0.04em] text-slate-700',
   }[headingLevel] ?? 'text-3xl font-semibold tracking-[-0.03em] text-slate-900';
 
-  return <Component className={cn(levelClassName, className)}>{children}</Component>;
+  return <Component className={cn(levelClassName, className)} {...props}>{children}</Component>;
 }
 
 export function TextInput({ onChange, className = '', ...props }) {

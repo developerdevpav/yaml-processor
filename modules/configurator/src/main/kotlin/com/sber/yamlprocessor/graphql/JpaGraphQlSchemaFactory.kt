@@ -43,7 +43,8 @@ class JpaGraphQlSchemaFactory(
                 "  createReverseOutputNode(reverseId: ID!, input: ReverseOutputInput!): ReverseOutput!",
                 "  updateReverseOutputNode(id: ID!, input: ReverseOutputInput!): ReverseOutput!",
                 "  deleteReverseOutputNode(id: ID!): Boolean!",
-                "  updateProcessNode(id: ID!, input: ProcessInput!): Process!"
+                "  updateProcessNode(id: ID!, input: ProcessInput!): Process!",
+                "  renameContextCodesDictionary(id: ID!, code: String!): ContextCodesDictionary!"
             )
 
         val types = registry.entities.values.joinToString("\n\n") { renderComplexType(it) }

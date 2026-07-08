@@ -565,6 +565,54 @@ class JpaGraphQlCrudService(
         return true
     }
 
+    @Transactional
+    fun renameContextCodesDictionary(id: Any?, code: String): ContextCodesDictionary {
+        val currentCode = id?.toString()?.trim().orEmpty()
+        val nextCode = code.trim()
+
+        require(currentCode.isNotBlank()) { "Context code id must not be blank" }
+        require(nextCode.isNotBlank()) { "Context code must not be blank" }
+        require(nextCode.length <= 64) { "Context code must be 64 characters or less" }
+
+        val current = entityManager.find(ContextCodesDictionary::class.java, currentCode)
+            ?: error("ContextCodesDictionary with code=$currentCode not found")
+
+        if (currentCode == nextCode) {
+            return current
+        }
+
+        require(entityManager.find(ContextCodesDictionary::class.java, nextCode) == null) {
+            "ContextCodesDictionary with code=$nextCode already exists"
+        }
+
+        val replacement = ContextCodesDictionary(code = nextCode)
+        entityManager.persist(replacement)
+        entityManager.flush()
+
+        entityManager.createQuery(
+            "update Process p set p.contextCode = :replacement where p.contextCode = :current"
+        )
+            .setParameter("replacement", replacement)
+            .setParameter("current", current)
+            .executeUpdate()
+        entityManager.createQuery(
+            "update Stage s set s.contextCode = :replacement where s.contextCode = :current"
+        )
+            .setParameter("replacement", replacement)
+            .setParameter("current", current)
+            .executeUpdate()
+
+        entityManager.flush()
+        entityManager.clear()
+
+        entityManager.find(ContextCodesDictionary::class.java, currentCode)?.let(entityManager::remove)
+        entityManager.flush()
+        entityManager.clear()
+
+        return entityManager.find(ContextCodesDictionary::class.java, nextCode)
+            ?: error("ContextCodesDictionary with code=$nextCode not found after rename")
+    }
+
     private fun sanitize(value: Any?, type: ComplexTypeMetadata) {
         if (value == null) {
             return

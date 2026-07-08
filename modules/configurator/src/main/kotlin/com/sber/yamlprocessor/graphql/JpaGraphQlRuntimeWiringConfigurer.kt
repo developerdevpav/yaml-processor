@@ -118,6 +118,9 @@ class JpaGraphQlRuntimeWiringConfigurer(
                 @Suppress("UNCHECKED_CAST")
                 service.updateProcessNode(env.getArgument("id"), env.getArgument<Map<String, Any?>>("input"))
             }
+            type.dataFetcher("renameContextCodesDictionary") { env ->
+                service.renameContextCodesDictionary(env.getArgument("id"), env.getArgument("code"))
+            }
             type
         }
     }

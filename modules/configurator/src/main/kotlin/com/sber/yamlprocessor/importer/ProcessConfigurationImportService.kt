@@ -4,7 +4,9 @@ import com.fasterxml.jackson.annotation.JsonAlias
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.databind.DeserializationFeature
+import com.fasterxml.jackson.databind.SerializationFeature
 import com.fasterxml.jackson.dataformat.yaml.YAMLMapper
+import com.fasterxml.jackson.dataformat.yaml.YAMLGenerator
 import com.sber.yamlprocessor.model.ActionPhasesDictionary
 import com.sber.yamlprocessor.model.Audit
 import com.sber.yamlprocessor.model.B3StatusDictionary
@@ -32,6 +34,7 @@ import jakarta.persistence.EntityManager
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.multipart.MultipartFile
+import java.io.InputStream
 import java.util.UUID
 
 data class ImportedProcessConfig(
@@ -40,11 +43,6 @@ data class ImportedProcessConfig(
     val processId: UUID?,
     val contextCode: String?
 )
-
-enum class YamlImportScheme {
-    NEW,
-    LEGACY
-}
 
 @Service
 class ProcessConfigurationImportService(
@@ -55,12 +53,24 @@ class ProcessConfigurationImportService(
         .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
         .build()
 
+    private val beautifyYamlMapper = YAMLMapper.builder()
+        .findAndAddModules()
+        .disable(YAMLGenerator.Feature.WRITE_DOC_START_MARKER)
+        .enable(YAMLGenerator.Feature.MINIMIZE_QUOTES)
+        .enable(YAMLGenerator.Feature.INDENT_ARRAYS_WITH_INDICATOR)
+        .enable(SerializationFeature.INDENT_OUTPUT)
+        .build()
+
     @Transactional
-    fun import(files: List<MultipartFile>, scheme: YamlImportScheme = YamlImportScheme.NEW): List<ImportedProcessConfig> {
+    fun import(files: List<MultipartFile>): List<ImportedProcessConfig> {
         require(files.isNotEmpty()) { "Не выбраны YAML-файлы для импорта." }
 
         return files.map { file ->
-            val processDefinition = parse(file, scheme)
+            val filename = file.originalFilename?.ifBlank { file.name } ?: file.name
+            require(!file.isEmpty) {
+                "Файл $filename пуст."
+            }
+            val processDefinition = parse(file.inputStream, filename)
             val processConfig = ProcessConfig()
             val process = processDefinition.toEntity(processConfig)
             processConfig.process = process
@@ -68,7 +78,7 @@ class ProcessConfigurationImportService(
             entityManager.flush()
 
             ImportedProcessConfig(
-                filename = file.originalFilename?.ifBlank { file.name } ?: file.name,
+                filename = filename,
                 processConfigId = processConfig.id ?: error("Imported ProcessConfig id was not generated"),
                 processId = process.id,
                 contextCode = process.contextCode?.code
@@ -76,38 +86,66 @@ class ProcessConfigurationImportService(
         }
     }
 
-    private fun parse(file: MultipartFile, scheme: YamlImportScheme): ImportedProcessDefinition {
-        require(!file.isEmpty) {
-            "Файл ${file.originalFilename ?: file.name} пуст."
+    @Transactional
+    fun replaceProcessConfig(
+        processConfigId: UUID,
+        content: String
+    ): ImportedProcessConfig {
+        require(content.isNotBlank()) { "YAML-конфигурация пуста." }
+
+        val processConfig = entityManager.find(ProcessConfig::class.java, processConfigId)
+            ?: error("ProcessConfig with id=$processConfigId not found")
+        val processDefinition = parse(content.byteInputStream(), "process.yaml")
+
+        processConfig.process?.let { currentProcess ->
+            processConfig.process = null
+            currentProcess.processConfig = null
+            entityManager.remove(currentProcess)
+            entityManager.flush()
         }
 
-        val root = runCatching { yamlMapper.readTree(file.inputStream) }
-            .getOrElse { throw IllegalArgumentException("Не удалось прочитать YAML ${file.originalFilename ?: file.name}: ${it.message}", it) }
+        val process = processDefinition.toEntity(processConfig)
+        processConfig.process = process
+        entityManager.persist(process)
+        entityManager.flush()
+
+        return ImportedProcessConfig(
+            filename = "process.yaml",
+            processConfigId = processConfig.id ?: error("Updated ProcessConfig id is missing"),
+            processId = process.id,
+            contextCode = process.contextCode?.code
+        )
+    }
+
+    fun beautifyYaml(content: String): String {
+        if (content.isBlank()) {
+            return ""
+        }
+
+        val root = runCatching { beautifyYamlMapper.readTree(content) }
+            .getOrElse { throw IllegalArgumentException("YAML невалиден: ${it.message}", it) }
+            ?: return ""
+
+        return beautifyYamlMapper.writeValueAsString(root)
+            .let { if (it.endsWith('\n')) it else "$it\n" }
+    }
+
+    private fun parse(inputStream: InputStream, filename: String): ImportedProcessDefinition {
+        val root = runCatching { yamlMapper.readTree(inputStream) }
+            .getOrElse { throw IllegalArgumentException("Не удалось прочитать YAML $filename: ${it.message}", it) }
 
         require(root != null && root.isObject) {
-            "Файл ${file.originalFilename ?: file.name} должен содержать YAML-объект верхнего уровня."
+            "Файл $filename должен содержать YAML-объект верхнего уровня."
         }
 
         val processNode = if (root.has("process")) root.get("process") else root
-        return when (scheme) {
-            YamlImportScheme.NEW ->
-                runCatching { yamlMapper.treeToValue(processNode, ImportedProcessDefinition::class.java) }
-                    .getOrElse {
-                        throw IllegalArgumentException(
-                            "Файл ${file.originalFilename ?: file.name} не соответствует ожидаемой new-схеме процесса: ${it.message}",
-                            it
-                        )
-                    }
-
-            YamlImportScheme.LEGACY ->
-                runCatching { yamlMapper.treeToValue(processNode, ImportedLegacyProcessDefinition::class.java).toNewDefinition() }
-                    .getOrElse {
-                        throw IllegalArgumentException(
-                            "Файл ${file.originalFilename ?: file.name} не соответствует ожидаемой legacy-схеме процесса: ${it.message}",
-                            it
-                        )
-                    }
-        }
+        return runCatching { yamlMapper.treeToValue(processNode, ImportedProcessDefinition::class.java) }
+            .getOrElse {
+                throw IllegalArgumentException(
+                    "Файл $filename не соответствует ожидаемой схеме процесса: ${it.message}",
+                    it
+                )
+            }
     }
 
     private fun ImportedProcessDefinition.toEntity(processConfig: ProcessConfig): Process {
@@ -405,70 +443,3 @@ data class ImportedAuditDefinition(
 data class ImportedTriggerDefinition(
     val rule: String? = null
 )
-
-@JsonIgnoreProperties(ignoreUnknown = false)
-data class ImportedLegacyProcessDefinition(
-    val id: String? = null,
-    @field:JsonProperty("context-code")
-    @field:JsonAlias("contextCode")
-    val contextCode: String? = null,
-    val disabled: Boolean = false,
-    val description: String? = null,
-    val subprocess: List<ImportedLegacySubprocessDefinition> = emptyList()
-)
-
-@JsonIgnoreProperties(ignoreUnknown = false)
-data class ImportedLegacySubprocessDefinition(
-    val id: String? = null,
-    @field:JsonProperty("context-code")
-    @field:JsonAlias("contextCode")
-    val contextCode: String? = null,
-    val description: String? = null,
-    val disabled: Boolean = false,
-    val trigger: ImportedTriggerDefinition = ImportedTriggerDefinition(),
-    val stages: List<ImportedLegacyStageDefinition> = emptyList()
-)
-
-@JsonIgnoreProperties(ignoreUnknown = false)
-data class ImportedLegacyStageDefinition(
-    val id: String? = null,
-    val executor: String? = null,
-    val log: ImportedLogDefinition? = null,
-    @field:JsonProperty("context-code")
-    @field:JsonAlias("contextCode")
-    val contextCode: String? = null,
-    val description: String? = null,
-    val configurator: ImportedConfiguratorDefinition = ImportedConfiguratorDefinition()
-)
-
-private fun ImportedLegacyProcessDefinition.toNewDefinition(): ImportedProcessDefinition =
-    ImportedProcessDefinition(
-        id = id,
-        contextCode = contextCode,
-        disabled = disabled,
-        nodeName = id,
-        nodeComment = description,
-        subprocess = subprocess.map { it.toNewDefinition() }
-    )
-
-private fun ImportedLegacySubprocessDefinition.toNewDefinition(): ImportedSubprocessDefinition =
-    ImportedSubprocessDefinition(
-        id = id,
-        contextCode = contextCode,
-        nodeName = id,
-        nodeComment = description,
-        disabled = disabled,
-        trigger = trigger,
-        stages = stages.map { it.toNewDefinition() }
-    )
-
-private fun ImportedLegacyStageDefinition.toNewDefinition(): ImportedStageDefinition =
-    ImportedStageDefinition(
-        id = id,
-        executor = executor,
-        log = log,
-        contextCode = contextCode,
-        nodeName = id,
-        nodeComment = description,
-        configurator = configurator
-    )

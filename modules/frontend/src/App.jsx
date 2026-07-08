@@ -1,6 +1,6 @@
 import { gql, useMutation, useQuery } from '@apollo/client';
 import { CheckVerified02, Plus, Save01, Trash01, XCircle, XClose } from '@untitledui/icons';
-import { useEffect, useRef, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { Position } from 'reactflow';
 import { FileUploadModal, ExportTypeModal, JsonLogicPlaygroundModal, JsonSnippetEditor } from './components/modals/YamlModals';
 import { NodeViewer } from './components/panels/NodeViewer';
@@ -59,6 +59,33 @@ function downloadBlob(blob, filename) {
 
 function formatAutosaveCountdownLabel(secondsLeft) {
   return `${Math.max(1, Math.ceil(secondsLeft))} c`;
+}
+
+const CONTEXT_CODE_MAX_LENGTH = 64;
+
+function normalizeProcessCode(value) {
+  return String(value ?? '').trim();
+}
+
+function validateProcessCode(value) {
+  const code = normalizeProcessCode(value);
+  if (!code) {
+    return 'Код процесса не должен быть пустым.';
+  }
+
+  if (code.length > CONTEXT_CODE_MAX_LENGTH) {
+    return `Код процесса должен быть не длиннее ${CONTEXT_CODE_MAX_LENGTH} символов.`;
+  }
+
+  return '';
+}
+
+function getYamlEditorSourceKey(processConfig) {
+  if (!processConfig?.id) {
+    return '';
+  }
+
+  return `${processConfig.id}:${processConfig.updatedAt ?? ''}`;
 }
 
 function isEmptyJsonValue(value) {
@@ -256,6 +283,22 @@ const UPDATE_PROCESS = gql`
 const DELETE_PROCESS_CONFIG = gql`
   mutation DeleteProcessConfig($id: ID!) {
     deleteProcessConfig(id: $id)
+  }
+`;
+
+const CREATE_CONTEXT_CODE = gql`
+  mutation CreateContextCode($code: ID!) {
+    createContextCodesDictionary(input: { code: $code }) {
+      code
+    }
+  }
+`;
+
+const RENAME_CONTEXT_CODE = gql`
+  mutation RenameContextCode($id: ID!, $code: String!) {
+    renameContextCodesDictionary(id: $id, code: $code) {
+      code
+    }
   }
 `;
 
@@ -851,22 +894,27 @@ function estimateReverseOutputNodeHeight({ summaryItems }) {
 }
 
 function estimateReverseNodeHeight(statusValue, isExpandable) {
+  const contextNoteLines = estimateTextLines('Входящий статус события для обработки', 26);
   const statusLines = estimateTextLines(statusValue, 24);
   return Math.min(
     TOPOLOGY_NODE_HEIGHT,
-    Math.max(110, 92 + statusLines * TOPOLOGY_TEXT_LINE_HEIGHT + (isExpandable ? 28 : 0)),
+    Math.max(
+      126,
+      92 + contextNoteLines * TOPOLOGY_TEXT_LINE_HEIGHT + statusLines * TOPOLOGY_TEXT_LINE_HEIGHT + (isExpandable ? 28 : 0),
+    ),
   );
 }
 
 function estimateResultNodeHeight({ scenarios, isExpandable }) {
   const normalizedScenarios = (scenarios?.length ? scenarios : ['']).map((scenario) => estimateTextLines(scenario, 32));
+  const contextNoteHeight = 24;
   const contentHeight = normalizedScenarios.reduce(
     (sum, lineCount) => sum + Math.max(40, lineCount * TOPOLOGY_TEXT_LINE_HEIGHT + 8),
     0,
   );
   return Math.min(
     TOPOLOGY_NODE_HEIGHT,
-    Math.max(120, 84 + contentHeight + (normalizedScenarios.length - 1) * 8 + (isExpandable ? 28 : 0)),
+    Math.max(120, 84 + contextNoteHeight + contentHeight + (normalizedScenarios.length - 1) * 8 + (isExpandable ? 28 : 0)),
   );
 }
 
@@ -1542,7 +1590,7 @@ function getNodePreviewPayload(kind, draft, subprocessTriggerText = '', filterEv
   return getNodeSavePayload(kind, draft, subprocessTriggerText, filterEventRuleText, reverseOutputRuleText);
 }
 
-function NodeEditor({
+const NodeEditor = forwardRef(function NodeEditor({
   processConfig,
   selectedNodeId,
   onSave,
@@ -1557,7 +1605,7 @@ function NodeEditor({
   slaDurationUnitOptions,
   slaStatusOptions,
   isSaving,
-}) {
+}, ref) {
   const selected = findSelectedNode(processConfig, selectedNodeId);
   const [draft, setDraft] = useState({});
   const [bulkResultInput, setBulkResultInput] = useState('');
@@ -1644,6 +1692,45 @@ function NodeEditor({
       clearAutosaveScheduling();
     };
   }, []);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      saveNow: async () => {
+        if (!selected) {
+          return false;
+        }
+
+        let nextPayload;
+        try {
+          nextPayload = getNodeSavePayload(
+            selectedKind,
+            draft,
+            subprocessTriggerText,
+            filterEventRuleText,
+            reverseOutputRuleText,
+          );
+        } catch {
+          return false;
+        }
+
+        const nextPayloadSnapshot = JSON.stringify(nextPayload);
+        if (nextPayloadSnapshot === lastSavedPayloadRef.current) {
+          clearAutosaveScheduling();
+          return true;
+        }
+
+        clearAutosaveScheduling();
+        const saved = await onSaveRef.current(nextPayload);
+        if (saved) {
+          lastSavedPayloadRef.current = nextPayloadSnapshot;
+        }
+
+        return saved;
+      },
+    }),
+    [draft, filterEventRuleText, ref, reverseOutputRuleText, selected, selectedKind, subprocessTriggerText],
+  );
 
   useEffect(() => {
     if (selected?.kind !== 'subprocess') {
@@ -2593,7 +2680,7 @@ function NodeEditor({
       </CardBody>
     </Card>
   );
-}
+});
 
 function NodeOrderEditor({ processConfig, selectedNodeId, onReorderStages, onReorderReverseOutputs, isSaving }) {
   const selected = findSelectedNode(processConfig, selectedNodeId);
@@ -2729,12 +2816,176 @@ function NodeOrderEditor({ processConfig, selectedNodeId, onReorderStages, onReo
   );
 }
 
+function ProcessCodeManagerModal({
+  isOpen,
+  codes,
+  isSubmitting,
+  errorMessage,
+  onClose,
+  onCreate,
+  onRename,
+}) {
+  const [newCode, setNewCode] = useState('');
+  const [draftCodes, setDraftCodes] = useState({});
+  const [localError, setLocalError] = useState('');
+  const codesSnapshot = codes.join('\u0000');
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    setNewCode('');
+    setLocalError('');
+    setDraftCodes(Object.fromEntries(codes.map((code) => [code, code])));
+  }, [codesSnapshot, isOpen]);
+
+  if (!isOpen) {
+    return null;
+  }
+
+  const sortedCodes = [...codes].sort((left, right) => left.localeCompare(right));
+  const codeSet = new Set(codes);
+  const visibleError = localError || errorMessage;
+
+  const validateUniqueCode = (value, currentCode = '') => {
+    const validationError = validateProcessCode(value);
+    if (validationError) {
+      return validationError;
+    }
+
+    const normalizedCode = normalizeProcessCode(value);
+    if (normalizedCode !== currentCode && codeSet.has(normalizedCode)) {
+      return `Код процесса "${normalizedCode}" уже существует.`;
+    }
+
+    return '';
+  };
+
+  const handleCreate = async (event) => {
+    event.preventDefault();
+    const validationError = validateUniqueCode(newCode);
+    if (validationError) {
+      setLocalError(validationError);
+      return;
+    }
+
+    setLocalError('');
+    const created = await onCreate(normalizeProcessCode(newCode));
+    if (created) {
+      setNewCode('');
+    }
+  };
+
+  const handleRename = async (currentCode) => {
+    const nextCode = normalizeProcessCode(draftCodes[currentCode] ?? currentCode);
+    const validationError = validateUniqueCode(nextCode, currentCode);
+    if (validationError) {
+      setLocalError(validationError);
+      return;
+    }
+
+    if (nextCode === currentCode) {
+      return;
+    }
+
+    setLocalError('');
+    await onRename(currentCode, nextCode);
+  };
+
+  return (
+    <div className="modal-shell" role="dialog" aria-modal="true" aria-labelledby="process-code-manager-title">
+      <div className="modal-shell__backdrop" onClick={isSubmitting ? undefined : onClose} />
+      <div className="modal-card process-code-modal">
+        <div className="modal-card__header">
+          <div>
+            <Title headingLevel="h3" className="modal-card__title" id="process-code-manager-title">
+              Код процесса
+            </Title>
+            <Text component="small" className="modal-card__subtitle">
+              Создавайте и переименовывайте значения справочника contextCodesDictionaryList.
+            </Text>
+          </div>
+          <button
+            type="button"
+            className="modal-card__close"
+            onClick={onClose}
+            disabled={isSubmitting}
+            aria-label="Закрыть"
+          >
+            <XClose aria-hidden size={18} />
+          </button>
+        </div>
+
+        <form className="process-code-manager__create" onSubmit={handleCreate}>
+          <TextInput
+            value={newCode}
+            onChange={(_, value) => setNewCode(value)}
+            placeholder="Новый код"
+            maxLength={CONTEXT_CODE_MAX_LENGTH}
+            aria-label="Новый код процесса"
+          />
+          <Button type="submit" isLoading={isSubmitting} isDisabled={isSubmitting}>
+            Создать
+          </Button>
+        </form>
+
+        <div className="process-code-manager__list">
+          {sortedCodes.length === 0 ? (
+            <div className="process-code-manager__empty">Справочник кодов процесса пока пуст.</div>
+          ) : (
+            sortedCodes.map((code) => {
+              const draftValue = draftCodes[code] ?? code;
+              const normalizedDraftValue = normalizeProcessCode(draftValue);
+              const isChanged = normalizedDraftValue !== code;
+
+              return (
+                <div key={code} className="process-code-manager__row">
+                  <TextInput
+                    value={draftValue}
+                    onChange={(_, value) =>
+                      setDraftCodes((current) => ({
+                        ...current,
+                        [code]: value,
+                      }))
+                    }
+                    maxLength={CONTEXT_CODE_MAX_LENGTH}
+                    aria-label={`Код процесса ${code}`}
+                  />
+                  <Button
+                    variant="secondary"
+                    onClick={() => handleRename(code)}
+                    isDisabled={isSubmitting || !isChanged || !normalizedDraftValue}
+                  >
+                    Сохранить
+                  </Button>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {visibleError && <div className="process-code-manager__error">{visibleError}</div>}
+      </div>
+    </div>
+  );
+}
+
 export function App() {
-  const { data, loading, error, refetch } = useQuery(PROCESS_FIELDS);
+  const { data, loading, error, refetch } = useQuery(PROCESS_FIELDS, {
+    fetchPolicy: 'no-cache',
+    notifyOnNetworkStatusChange: true,
+  });
   const [createProcess, createState] = useMutation(CREATE_PROCESS, {
     fetchPolicy: 'no-cache',
   });
   const [deleteProcessConfig, deleteProcessConfigState] = useMutation(DELETE_PROCESS_CONFIG, {
+    fetchPolicy: 'no-cache',
+  });
+  const [createContextCode, createContextCodeState] = useMutation(CREATE_CONTEXT_CODE, {
+    fetchPolicy: 'no-cache',
+  });
+  const [renameContextCode, renameContextCodeState] = useMutation(RENAME_CONTEXT_CODE, {
     fetchPolicy: 'no-cache',
   });
   const [updateProcess, updateState] = useMutation(UPDATE_PROCESS, {
@@ -2810,7 +3061,6 @@ export function App() {
   const [updateErrorMessage, setUpdateErrorMessage] = useState('');
   const [exportErrorMessage, setExportErrorMessage] = useState('');
   const [importErrorMessage, setImportErrorMessage] = useState('');
-  const [isTopologyFullscreen, setIsTopologyFullscreen] = useState(false);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [localProcessConfig, setLocalProcessConfig] = useState(null);
   const [editorPreview, setEditorPreview] = useState(null);
@@ -2819,9 +3069,18 @@ export function App() {
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isImportingProcessConfig, setIsImportingProcessConfig] = useState(false);
+  const [isProcessCodeManagerOpen, setIsProcessCodeManagerOpen] = useState(false);
+  const [processCodeManagerError, setProcessCodeManagerError] = useState('');
   const [importFiles, setImportFiles] = useState([]);
-  const [importScheme, setImportScheme] = useState('NEW');
-  const [exportType, setExportType] = useState('DEFAULT');
+  const [processEditorMode, setProcessEditorMode] = useState('VISUAL');
+  const [yamlEditorText, setYamlEditorText] = useState('');
+  const [yamlEditorBaseline, setYamlEditorBaseline] = useState('');
+  const [yamlEditorError, setYamlEditorError] = useState('');
+  const [yamlEditorSourceKey, setYamlEditorSourceKey] = useState('');
+  const [yamlEditorOpenVersion, setYamlEditorOpenVersion] = useState(0);
+  const [isYamlEditorLoading, setIsYamlEditorLoading] = useState(false);
+  const [isYamlEditorSaving, setIsYamlEditorSaving] = useState(false);
+  const [isYamlEditorBeautifying, setIsYamlEditorBeautifying] = useState(false);
   const [isJsonLogicPlaygroundOpen, setIsJsonLogicPlaygroundOpen] = useState(false);
   const [jsonLogicPlaygroundTitle, setJsonLogicPlaygroundTitle] = useState('');
   const [jsonLogicPlaygroundInput, setJsonLogicPlaygroundInput] = useState('{}');
@@ -2830,7 +3089,8 @@ export function App() {
   const [jsonLogicPlaygroundError, setJsonLogicPlaygroundError] = useState('');
   const [isEvaluatingJsonLogic, setIsEvaluatingJsonLogic] = useState(false);
   const [autosaveStatus, setAutosaveStatus] = useState(null);
-  const topologyContainerRef = useRef(null);
+  const nodeEditorRef = useRef(null);
+  const manualEditorSaveInFlightRef = useRef(false);
 
   const processConfigs = data?.processConfigList ?? [];
   const isInitialLoading = loading && processConfigs.length === 0;
@@ -2839,6 +3099,7 @@ export function App() {
   const slaDurationUnitOptions = (data?.slaDurationUnitDictionaryList ?? []).map((item) => item.code).filter(Boolean);
   const slaStatusOptions = (data?.slaStatusDictionaryList ?? []).map((item) => item.code).filter(Boolean);
   const processCodeOptions = (data?.contextCodesDictionaryList ?? []).map((item) => item.code).filter(Boolean);
+  const isProcessCodeManagerSubmitting = createContextCodeState.loading || renameContextCodeState.loading;
   const processConfigOptions = processConfigs.map((item) => {
     const processName = item.process?.nodeName?.trim() || item.process?.contextCode?.code?.trim() || 'Process';
 
@@ -2879,6 +3140,47 @@ export function App() {
     activeProcessConfig && editorNodeId && editorPreview?.nodeId === editorNodeId
       ? updateSelectedNode(activeProcessConfig, editorNodeId, editorPreview.values)
       : activeProcessConfig;
+  const hasYamlEditorChanges = yamlEditorText !== yamlEditorBaseline;
+  const yamlEditorStatus = isYamlEditorLoading
+    ? 'Загрузка...'
+    : isYamlEditorSaving
+      ? 'Сохранение...'
+      : isYamlEditorBeautifying
+        ? 'Форматирование...'
+        : hasYamlEditorChanges
+          ? 'Есть несохраненные изменения'
+          : yamlEditorText
+            ? 'YAML актуален'
+            : '';
+
+  async function loadYamlEditorContent(processConfig) {
+    if (!processConfig?.id) {
+      setYamlEditorText('');
+      setYamlEditorBaseline('');
+      setYamlEditorError('');
+      setYamlEditorSourceKey('');
+      return;
+    }
+
+    try {
+      setYamlEditorError('');
+      setIsYamlEditorLoading(true);
+      const response = await fetch(`/api/process-configs/${processConfig.id}/export`);
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || `HTTP ${response.status}`);
+      }
+
+      const yaml = await response.text();
+      setYamlEditorText(yaml);
+      setYamlEditorBaseline(yaml);
+      setYamlEditorSourceKey(getYamlEditorSourceKey(processConfig));
+    } catch (requestError) {
+      setYamlEditorError(getErrorMessage(requestError, 'Не удалось загрузить YAML-конфигурацию.'));
+    } finally {
+      setIsYamlEditorLoading(false);
+    }
+  }
 
   useEffect(() => {
     if (!serverActiveProcessConfig) {
@@ -2903,6 +3205,26 @@ export function App() {
       setExpandedNodeIds(getDefaultExpandedNodeIds(activeProcessConfig));
     }
   }, [activeProcessConfig, selectedConfigId]);
+
+  useEffect(() => {
+    if (processEditorMode !== 'YAML') {
+      return;
+    }
+
+    if (!activeProcessConfig?.id) {
+      setYamlEditorText('');
+      setYamlEditorBaseline('');
+      setYamlEditorError('');
+      setYamlEditorSourceKey('');
+      return;
+    }
+
+    if (hasYamlEditorChanges) {
+      return;
+    }
+
+    loadYamlEditorContent(activeProcessConfig);
+  }, [processEditorMode, activeProcessConfig?.id, activeProcessConfig?.updatedAt, yamlEditorOpenVersion]);
 
   useEffect(() => {
     if (!activeProcessConfig) {
@@ -2942,19 +3264,6 @@ export function App() {
       return next.length === current.length ? current : next;
     });
   }, [activeProcessConfig]);
-
-  useEffect(() => {
-    const handleFullscreenChange = () => {
-      setIsTopologyFullscreen(document.fullscreenElement === topologyContainerRef.current);
-      window.dispatchEvent(new Event('resize'));
-    };
-
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-
-    return () => {
-      document.removeEventListener('fullscreenchange', handleFullscreenChange);
-    };
-  }, []);
 
   useEffect(() => {
     setIsEditorOpen(Boolean(findSelectedNode(activeProcessConfig, editorNodeId)));
@@ -3028,6 +3337,84 @@ export function App() {
     }
   }, [importErrorMessage]);
 
+  const handleOpenProcessCodeManager = () => {
+    setProcessCodeManagerError('');
+    setIsProcessCodeManagerOpen(true);
+  };
+
+  const handleCloseProcessCodeManager = () => {
+    if (isProcessCodeManagerSubmitting) {
+      return;
+    }
+
+    setProcessCodeManagerError('');
+    setIsProcessCodeManagerOpen(false);
+  };
+
+  const handleCreateProcessCode = async (rawCode) => {
+    const code = normalizeProcessCode(rawCode);
+    const validationError = validateProcessCode(code);
+    if (validationError) {
+      setProcessCodeManagerError(validationError);
+      return false;
+    }
+
+    if (processCodeOptions.includes(code)) {
+      setProcessCodeManagerError(`Код процесса "${code}" уже существует.`);
+      return false;
+    }
+
+    try {
+      setProcessCodeManagerError('');
+      await createContextCode({
+        variables: { code },
+      });
+      await refetch();
+      showSuccessToast('Код процесса создан', `Код "${code}" добавлен в справочник.`);
+      return true;
+    } catch (mutationError) {
+      setProcessCodeManagerError(getErrorMessage(mutationError, 'Не удалось создать код процесса.'));
+      return false;
+    }
+  };
+
+  const handleRenameProcessCode = async (currentCode, rawNextCode) => {
+    const nextCode = normalizeProcessCode(rawNextCode);
+    const validationError = validateProcessCode(nextCode);
+    if (validationError) {
+      setProcessCodeManagerError(validationError);
+      return false;
+    }
+
+    if (nextCode === currentCode) {
+      return true;
+    }
+
+    if (processCodeOptions.includes(nextCode)) {
+      setProcessCodeManagerError(`Код процесса "${nextCode}" уже существует.`);
+      return false;
+    }
+
+    try {
+      setProcessCodeManagerError('');
+      await renameContextCode({
+        variables: {
+          id: currentCode,
+          code: nextCode,
+        },
+      });
+      setLocalProcessConfig(null);
+      setEditorPreview(null);
+      setAutosaveStatus(null);
+      await refetch();
+      showSuccessToast('Код процесса обновлен', `Код "${currentCode}" переименован в "${nextCode}".`);
+      return true;
+    } catch (mutationError) {
+      setProcessCodeManagerError(getErrorMessage(mutationError, 'Не удалось обновить код процесса.'));
+      return false;
+    }
+  };
+
   const saveProcessConfig = async (nextConfig) => {
     try {
       setUpdateErrorMessage('');
@@ -3066,6 +3453,7 @@ export function App() {
           id: stageId,
           input: stripTypename({
             executor: selectedStage.executor ?? '',
+            contextCode: normalizeReferenceDraft(selectedStage.contextCode),
             nodeName: selectedStage.nodeName ?? '',
             nodeComment: selectedStage.nodeComment ?? '',
             log: selectedStage.log
@@ -3306,6 +3694,19 @@ export function App() {
     }
 
     return saved;
+  };
+
+  const handleManualEditorSave = async () => {
+    if (editorIsSaving || manualEditorSaveInFlightRef.current) {
+      return;
+    }
+
+    manualEditorSaveInFlightRef.current = true;
+    try {
+      await nodeEditorRef.current?.saveNow?.();
+    } finally {
+      manualEditorSaveInFlightRef.current = false;
+    }
   };
 
   const handleAddSubprocess = async () => {
@@ -3592,21 +3993,14 @@ export function App() {
     setOrderNodeId(null);
   };
 
-  const handleToggleTopologyFullscreen = async () => {
-    const container = topologyContainerRef.current;
-    if (!container) {
-      return;
-    }
-
-    if (document.fullscreenElement === container) {
-      await document.exitFullscreen();
-      return;
-    }
-
-    await container.requestFullscreen();
-  };
-
   const handleSelectProcessConfig = (configId) => {
+    if (processEditorMode === 'YAML' && hasYamlEditorChanges && configId !== selectedConfigId) {
+      const shouldSelect = window.confirm('Есть несохраненные изменения YAML. Перейти к другому процессу без сохранения?');
+      if (!shouldSelect) {
+        return;
+      }
+    }
+
     setSelectedConfigId(configId || null);
     setLocalProcessConfig(null);
     setEditorNodeId(null);
@@ -3618,8 +4012,136 @@ export function App() {
     setUpdateErrorMessage('');
     setExportErrorMessage('');
     setImportErrorMessage('');
+    setYamlEditorError('');
     setIsExportModalOpen(false);
-    setExportType('DEFAULT');
+  };
+
+  const handleProcessEditorModeChange = (nextMode) => {
+    if (nextMode === processEditorMode) {
+      return;
+    }
+
+    if (processEditorMode === 'YAML' && hasYamlEditorChanges) {
+      const shouldSwitch = window.confirm('Есть несохраненные изменения YAML. Перейти без сохранения?');
+      if (!shouldSwitch) {
+        return;
+      }
+      setYamlEditorText(yamlEditorBaseline);
+      setYamlEditorError('');
+    }
+
+    if (nextMode === 'YAML') {
+      setYamlEditorOpenVersion((current) => current + 1);
+    }
+
+    setProcessEditorMode(nextMode);
+  };
+
+  const handleReloadYamlEditor = async () => {
+    if (!activeProcessConfig?.id || isYamlEditorLoading || isYamlEditorSaving || isYamlEditorBeautifying) {
+      return;
+    }
+
+    if (hasYamlEditorChanges) {
+      const shouldReload = window.confirm('Есть несохраненные изменения YAML. Обновить текст с сервера?');
+      if (!shouldReload) {
+        return;
+      }
+    }
+
+    await loadYamlEditorContent(activeProcessConfig);
+  };
+
+  const handleBeautifyYamlEditor = async () => {
+    if (isYamlEditorLoading || isYamlEditorSaving || isYamlEditorBeautifying) {
+      return;
+    }
+
+    if (!yamlEditorText.trim()) {
+      setYamlEditorText('');
+      setYamlEditorError('');
+      return;
+    }
+
+    try {
+      setYamlEditorError('');
+      setIsYamlEditorBeautifying(true);
+      const response = await fetch('/api/process-configs/yaml/beautify', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'text/plain;charset=UTF-8',
+        },
+        body: yamlEditorText,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || `HTTP ${response.status}`);
+      }
+
+      setYamlEditorText(await response.text());
+    } catch (requestError) {
+      setYamlEditorError(getErrorMessage(requestError, 'Не удалось отформатировать YAML.'));
+    } finally {
+      setIsYamlEditorBeautifying(false);
+    }
+  };
+
+  const handleSaveYamlEditor = async () => {
+    if (!activeProcessConfig?.id || isYamlEditorLoading || isYamlEditorSaving || isYamlEditorBeautifying || !hasYamlEditorChanges) {
+      return;
+    }
+
+    try {
+      setYamlEditorError('');
+      setIsYamlEditorSaving(true);
+      const response = await fetch(`/api/process-configs/${activeProcessConfig.id}/yaml`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'text/plain;charset=UTF-8',
+        },
+        body: yamlEditorText,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || `HTTP ${response.status}`);
+      }
+
+      const payload = await response.json();
+      const nextProcessConfigId = payload?.processConfigId ?? payload?.process_config_id ?? activeProcessConfig.id;
+      const nextProcessId = payload?.processId ?? payload?.process_id ?? null;
+
+      setYamlEditorBaseline(yamlEditorText);
+      setEditorPreview(null);
+      setEditorNodeId(null);
+      setViewerNodeId(null);
+      setOrderNodeId(null);
+      setIsEditorOpen(false);
+      setSelectedConfigId(nextProcessConfigId);
+      setSelectedNodeId(nextProcessId ? `process:${nextProcessId}` : null);
+      setExpandedNodeIds(nextProcessId ? [`process:${nextProcessId}`] : []);
+
+      const refreshResult = await refetch();
+      const refreshedProcessConfig = (refreshResult.data?.processConfigList ?? []).find(
+        (item) => item.id === nextProcessConfigId,
+      );
+      if (refreshedProcessConfig) {
+        const refreshedProcessId = refreshedProcessConfig.process?.id ?? nextProcessId;
+        setYamlEditorSourceKey(getYamlEditorSourceKey(refreshedProcessConfig));
+        setLocalProcessConfig(refreshedProcessConfig);
+        setSelectedConfigId(refreshedProcessConfig.id);
+        setSelectedNodeId(refreshedProcessId ? `process:${refreshedProcessId}` : null);
+        setExpandedNodeIds(getDefaultExpandedNodeIds(refreshedProcessConfig));
+      } else {
+        setLocalProcessConfig(null);
+      }
+      showSuccessToast('YAML сохранен', 'Конфигурация процесса обновлена.');
+    } catch (requestError) {
+      setYamlEditorError(getErrorMessage(requestError, 'Не удалось сохранить YAML-конфигурацию.'));
+    } finally {
+      setIsYamlEditorSaving(false);
+    }
   };
 
   const handleOpenExportModal = () => {
@@ -3628,7 +4150,6 @@ export function App() {
     }
 
     setExportErrorMessage('');
-    setExportType('DEFAULT');
     setIsExportModalOpen(true);
   };
 
@@ -3639,7 +4160,6 @@ export function App() {
 
     setIsExportModalOpen(false);
     setExportErrorMessage('');
-    setExportType('DEFAULT');
   };
 
   const handleExportProcessConfig = async () => {
@@ -3651,9 +4171,7 @@ export function App() {
       setExportErrorMessage('');
       setIsExportingProcessConfig(true);
 
-      const response = await fetch(
-        `/api/process-configs/${activeProcessConfig.id}/export?type=${encodeURIComponent(exportType)}`,
-      );
+      const response = await fetch(`/api/process-configs/${activeProcessConfig.id}/export`);
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
@@ -3713,7 +4231,6 @@ export function App() {
   const handleOpenImportModal = () => {
     setImportErrorMessage('');
     setImportFiles([]);
-    setImportScheme('NEW');
     setIsImportModalOpen(true);
   };
 
@@ -3724,7 +4241,6 @@ export function App() {
 
     setIsImportModalOpen(false);
     setImportFiles([]);
-    setImportScheme('NEW');
     setImportErrorMessage('');
   };
 
@@ -3822,7 +4338,7 @@ export function App() {
         formData.append('files', file);
       });
 
-      const response = await fetch(`/api/process-configs/import?scheme=${encodeURIComponent(importScheme)}`, {
+      const response = await fetch('/api/process-configs/import', {
         method: 'POST',
         body: formData,
       });
@@ -3962,10 +4478,7 @@ export function App() {
   return (
     <Page>
       <div className="topology-workspace">
-        <div
-          ref={topologyContainerRef}
-          className={isTopologyFullscreen ? 'topology-stage topology-stage-fullscreen' : 'topology-stage'}
-        >
+        <div className="topology-stage">
           {isInitialLoading && (
             <div className="loading-state">
               <Spinner size="xl" />
@@ -4005,6 +4518,12 @@ export function App() {
                       isExporting={isExportingProcessConfig}
                       canExport={false}
                     />
+                    <Button variant="secondary" onClick={handleOpenProcessCodeManager}>
+                      Коды процесса
+                    </Button>
+                    <Button variant="secondary" onClick={handleOpenStandaloneJsonLogicPlayground}>
+                      Playground JsonLogic
+                    </Button>
                   </div>
                 </EmptyStateFooter>
                 {processCodeOptions.length === 0 && (
@@ -4031,12 +4550,24 @@ export function App() {
               onAddSubprocess={handleAddSubprocess}
               onCreateProcess={handleCreateProcess}
               onDeleteProcessConfig={handleDeleteProcessConfig}
+              onOpenProcessCodeManager={handleOpenProcessCodeManager}
               onImportProcessConfig={handleOpenImportModal}
               onExportProcessConfig={handleOpenExportModal}
               onOpenJsonLogicPlayground={handleOpenStandaloneJsonLogicPlayground}
               onSelectProcessConfig={handleSelectProcessConfig}
-              onToggleFullscreen={handleToggleTopologyFullscreen}
-              isFullscreen={isTopologyFullscreen}
+              editorMode={processEditorMode}
+              onEditorModeChange={handleProcessEditorModeChange}
+              yamlEditorText={yamlEditorText}
+              onYamlEditorChange={setYamlEditorText}
+              onYamlEditorSave={handleSaveYamlEditor}
+              onYamlEditorReload={handleReloadYamlEditor}
+              onYamlEditorBeautify={handleBeautifyYamlEditor}
+              isYamlEditorLoading={isYamlEditorLoading}
+              isYamlEditorSaving={isYamlEditorSaving}
+              isYamlEditorBeautifying={isYamlEditorBeautifying}
+              yamlEditorError={yamlEditorError}
+              yamlEditorStatus={yamlEditorStatus}
+              hasYamlEditorChanges={hasYamlEditorChanges}
               isCreateDisabled={processCodeOptions.length === 0}
               isCreating={createState.loading}
               isDeleting={deleteProcessConfigState.loading}
@@ -4063,11 +4594,16 @@ export function App() {
                   Countdown: bell + seconds.
                   Saving: bell + ellipsis.
                 */}
-                <div
+                <button
+                  type="button"
                   className={cn(
-                    'editor-drawer__status flex items-center gap-2',
+                    'editor-drawer__save-button editor-drawer__status flex items-center gap-2',
                     !editorIsSaving && !autosaveStatus?.secondsLeft && 'text-emerald-600',
                   )}
+                  onClick={handleManualEditorSave}
+                  disabled={editorIsSaving}
+                  aria-label="Сохранить изменения сразу"
+                  title="Сохранить изменения сразу"
                 >
                   <Save01 aria-hidden size={16} className={cn(!editorIsSaving && !autosaveStatus?.secondsLeft && 'text-emerald-600')} />
                   {(editorIsSaving || autosaveStatus?.secondsLeft) && (
@@ -4075,7 +4611,7 @@ export function App() {
                       {editorIsSaving ? '...' : formatAutosaveCountdownLabel(autosaveStatus.secondsLeft)}
                     </span>
                   )}
-                </div>
+                </button>
               </div>
               <Button variant="plain" onClick={handleCloseEditor} aria-label="Закрыть панель свойств">
                 <XClose aria-hidden className="editor-drawer__close-icon" size={16} />
@@ -4083,6 +4619,7 @@ export function App() {
             </div>
             <div className="editor-drawer__body">
               <NodeEditor
+                ref={nodeEditorRef}
                 processConfig={activeProcessConfig}
                 selectedNodeId={editorNodeId}
                 onSave={handleSaveNode}
@@ -4162,23 +4699,19 @@ export function App() {
           <FileUploadModal
             isOpen={isImportModalOpen}
             files={importFiles}
-            scheme={importScheme}
             isSubmitting={isImportingProcessConfig}
             errorMessage={importErrorMessage}
             onClose={handleCloseImportModal}
             onSubmit={handleImportProcessConfigs}
-            onSchemeChange={setImportScheme}
             onFilesSelected={handleImportFilesSelected}
             onRemoveFile={handleRemoveImportFile}
           />
           <ExportTypeModal
             isOpen={isExportModalOpen}
-            exportType={exportType}
             isSubmitting={isExportingProcessConfig}
             errorMessage={exportErrorMessage}
             onClose={handleCloseExportModal}
             onSubmit={handleExportProcessConfig}
-            onExportTypeChange={setExportType}
           />
           <JsonLogicPlaygroundModal
             isOpen={isJsonLogicPlaygroundOpen}
@@ -4192,6 +4725,15 @@ export function App() {
             onInputChange={setJsonLogicPlaygroundInput}
             onRuleChange={setJsonLogicPlaygroundRule}
             onEvaluate={handleEvaluateJsonLogic}
+          />
+          <ProcessCodeManagerModal
+            isOpen={isProcessCodeManagerOpen}
+            codes={processCodeOptions}
+            isSubmitting={isProcessCodeManagerSubmitting}
+            errorMessage={processCodeManagerError}
+            onClose={handleCloseProcessCodeManager}
+            onCreate={handleCreateProcessCode}
+            onRename={handleRenameProcessCode}
           />
           {toast && <Toast title={toast.title} message={toast.message} variant={toast.variant} onClose={() => setToast(null)} />}
         </div>

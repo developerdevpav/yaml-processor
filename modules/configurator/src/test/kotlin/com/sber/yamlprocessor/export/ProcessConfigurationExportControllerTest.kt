@@ -22,7 +22,7 @@ class ProcessConfigurationExportControllerTest {
 
     @Test
     fun `exports process config as yaml file`() {
-        given(exportService.exportProcessConfig("config-1", ProcessConfigurationExportType.DEFAULT))
+        given(exportService.exportProcessConfig("config-1"))
             .willReturn(
                 ProcessConfigurationExport(
                     filename = "process.yaml",
@@ -39,28 +39,6 @@ class ProcessConfigurationExportControllerTest {
                     string("Content-Disposition", containsString("process.yaml"))
                 }
                 content { string("description: test\n") }
-            }
-    }
-
-    @Test
-    fun `exports process config as legacy yaml file`() {
-        given(exportService.exportProcessConfig("config-1", ProcessConfigurationExportType.LEGACY))
-            .willReturn(
-                ProcessConfigurationExport(
-                    filename = "process.yaml",
-                    content = "process:\n  description: test\n"
-                )
-            )
-
-        mockMvc.get("/api/process-configs/config-1/export?type=LEGACY")
-            .andExpect {
-                status { isOk() }
-                content { contentType("application/yaml") }
-                header {
-                    string("Content-Disposition", containsString("attachment"))
-                    string("Content-Disposition", containsString("process.yaml"))
-                }
-                content { string("process:\n  description: test\n") }
             }
     }
 }

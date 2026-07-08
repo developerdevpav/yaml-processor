@@ -1,6 +1,5 @@
 package com.sber.yamlprocessor.graphql
 
-import com.sber.yamlprocessor.export.ProcessConfigurationExportType
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import com.sber.yamlprocessor.model.Configurator
@@ -112,64 +111,4 @@ class ProcessConfigurationExportServiceTest {
         assertFalse(exported.content.contains("status: null"), exported.content)
     }
 
-    @Test
-    fun `exports legacy schema with description from node name and without ids`() {
-        val output = ReverseOutput(
-            log = EventLog(journalServiceName = ""),
-            body = Body(
-                service = Service(
-                    scenario = "scenario_a",
-                    type = "",
-                    sla = SlaState(
-                        status = SlaStatusDictionary(code = "INIT"),
-                        durationValue = 15,
-                        durationUnit = SlaDurationUnitDictionary(code = "MINUTES")
-                    )
-                ),
-                type = "SERVICE"
-            )
-        )
-        val reverse = Reverse(output = mutableListOf(output))
-        output.reverse = reverse
-        val result = Result(reverse = mutableListOf(reverse))
-        reverse.result = result
-        val configurator = Configurator(result = mutableListOf(result))
-        result.configurator = configurator
-        val stage = Stage(executor = "executor.alpha", configurator = configurator)
-        configurator.stage = stage
-        val subprocessNode = Subprocess(nodeName = "subprocess name", nodeComment = "subprocess comment", trigger = Trigger(rule = "payload != null"))
-        stage.subprocess = subprocessNode
-        subprocessNode.stages = mutableListOf(stage)
-        val processConfig = ProcessConfig().apply {
-            process = Process(processConfig = this, nodeName = "process name", nodeComment = "process comment").apply {
-                subprocessNode.process = this
-                subprocess = mutableListOf(subprocessNode)
-            }
-        }
-
-        given(crudService.findProcessConfigForExport("config-legacy")).willReturn(processConfig)
-
-        val exported = exportService.exportProcessConfig(
-            "config-legacy",
-            ProcessConfigurationExportType.LEGACY
-        )
-
-        assertTrue(exported.content.contains("durationValue: 15"), exported.content)
-        assertTrue(exported.content.contains("durationUnit: MINUTES"), exported.content)
-        assertFalse(exported.content.contains("duration_value:"), exported.content)
-        assertFalse(exported.content.contains("duration_unit:"), exported.content)
-        assertTrue(exported.content.contains("description: process name"), exported.content)
-        assertTrue(exported.content.contains("description: subprocess name"), exported.content)
-        assertFalse(exported.content.contains("process comment"), exported.content)
-        assertFalse(exported.content.contains("subprocess comment"), exported.content)
-        assertFalse(exported.content.contains("\nid:"), exported.content)
-        assertFalse(exported.content.contains("node_name"), exported.content)
-        assertFalse(exported.content.contains("nodeName"), exported.content)
-        assertFalse(exported.content.contains("node_comment"), exported.content)
-        assertFalse(exported.content.contains("nodeComment"), exported.content)
-        assertFalse(exported.content.contains("type: null"), exported.content)
-        assertFalse(exported.content.contains("journal-service-name: null"), exported.content)
-        assertFalse(exported.content.contains("type: ''"), exported.content)
-        assertFalse(exported.content.contains("journal-service-name: ''"), exported.content)
-    }
 }

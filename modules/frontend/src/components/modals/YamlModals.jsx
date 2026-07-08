@@ -1,7 +1,6 @@
 import { Plus, XClose, ZapCircle } from '@untitledui/icons';
 import { useEffect, useRef, useState } from 'react';
-import { ProcessSelectField } from '../ProcessSelectField';
-import { Button, FormGroup, Text, Title } from '../ui/AppPrimitives';
+import { Button, Text, Title } from '../ui/AppPrimitives';
 import { cn, formatJsonSnippet } from '../../utils/ui';
 
 function useEscapeKey(isOpen, onClose) {
@@ -31,9 +30,13 @@ export function JsonSnippetEditor({
   onBeautify,
   onOpenPlayground,
   playgroundLabel = 'Открыть playground JsonLogic',
+  showLineNumbers = false,
 }) {
   const containerRef = useRef(null);
+  const lineNumberGutterRef = useRef(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const editorValue = value ?? '';
+  const lineNumbers = showLineNumbers ? Array.from({ length: Math.max(editorValue.split('\n').length, 1) }, (_, index) => index + 1) : [];
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -58,6 +61,12 @@ export function JsonSnippetEditor({
     }
 
     await container.requestFullscreen();
+  };
+
+  const handleTextareaScroll = (event) => {
+    if (lineNumberGutterRef.current) {
+      lineNumberGutterRef.current.scrollTop = event.currentTarget.scrollTop;
+    }
   };
 
   return (
@@ -97,14 +106,26 @@ export function JsonSnippetEditor({
           </button>
         </div>
       </div>
-      <textarea
-        id={id}
-        className="json-snippet__textarea"
-        spellCheck={false}
-        value={value}
-        readOnly={readOnly}
-        onChange={(event) => onChange(event.target.value)}
-      />
+      <div className={cn('json-snippet__editor', showLineNumbers && 'json-snippet__editor-with-lines')}>
+        {showLineNumbers && (
+          <div ref={lineNumberGutterRef} className="json-snippet__line-numbers" aria-hidden="true">
+            {lineNumbers.map((lineNumber) => (
+              <div key={lineNumber} className="json-snippet__line-number">
+                {lineNumber}
+              </div>
+            ))}
+          </div>
+        )}
+        <textarea
+          id={id}
+          className="json-snippet__textarea"
+          spellCheck={false}
+          value={editorValue}
+          readOnly={readOnly}
+          onChange={(event) => onChange(event.target.value)}
+          onScroll={handleTextareaScroll}
+        />
+      </div>
       {helperText && <p className="json-snippet__helper">{helperText}</p>}
       {error && <p className="json-snippet__error">{error}</p>}
     </div>
@@ -114,12 +135,10 @@ export function JsonSnippetEditor({
 export function FileUploadModal({
   isOpen,
   files,
-  scheme,
   isSubmitting,
   errorMessage,
   onClose,
   onSubmit,
-  onSchemeChange,
   onFilesSelected,
   onRemoveFile,
 }) {
@@ -176,20 +195,6 @@ export function FileUploadModal({
           <input ref={inputRef} type="file" hidden multiple accept=".yaml,.yml" onChange={handleFileChange} />
         </div>
 
-        <FormGroup label="Схема импорта" fieldId="yaml-import-scheme">
-          <ProcessSelectField
-            id="yaml-import-scheme"
-            value={scheme}
-            onChange={onSchemeChange}
-            options={[
-              { value: 'NEW', label: 'New schema.json' },
-              { value: 'LEGACY', label: 'Legacy schema_legacy.json' },
-            ]}
-            placeholder="Выберите схему"
-            isDisabled={isSubmitting}
-          />
-        </FormGroup>
-
         {files.length > 0 && (
           <div className="file-uploader__list">
             {files.map((file, index) => (
@@ -228,12 +233,10 @@ export function FileUploadModal({
 
 export function ExportTypeModal({
   isOpen,
-  exportType,
   isSubmitting,
   errorMessage,
   onClose,
   onSubmit,
-  onExportTypeChange,
 }) {
   useEscapeKey(isOpen, onClose);
 
@@ -250,31 +253,11 @@ export function ExportTypeModal({
             <Title headingLevel="h4" className="modal-card__title">
               <span id="yaml-export-title">Экспортировать YAML</span>
             </Title>
-            <Text className="modal-card__subtitle">Выберите тип экспорта процесса перед скачиванием файла.</Text>
+            <Text className="modal-card__subtitle">Процесс будет скачан в актуальной YAML-схеме.</Text>
           </div>
           <button type="button" className="modal-card__close" onClick={onClose} aria-label="Закрыть окно экспорта">
             <XClose aria-hidden size={18} />
           </button>
-        </div>
-
-        <FormGroup label="Тип экспорта" fieldId="yaml-export-type">
-          <ProcessSelectField
-            id="yaml-export-type"
-            value={exportType}
-            onChange={onExportTypeChange}
-            options={[
-              { value: 'DEFAULT', label: 'Default' },
-              { value: 'LEGACY', label: 'Legacy' },
-            ]}
-            placeholder="Выберите тип"
-            isDisabled={isSubmitting}
-          />
-        </FormGroup>
-
-        <div className="export-modal__hint">
-          {exportType === 'LEGACY'
-            ? 'Legacy: без id, node_name и node_comment. Значение node_name переносится в description, null и пустые строки не экспортируются.'
-            : 'Default: процесс экспортируется как есть, но null и пустые строки не попадают в YAML.'}
         </div>
 
         {errorMessage && <div className="file-uploader__error">{errorMessage}</div>}
@@ -337,6 +320,7 @@ export function JsonLogicPlaygroundModal({
               onChange={onInputChange}
               onBeautify={() => onInputChange(formatJsonSnippet(inputText))}
               helperText="Укажите JSON, на котором нужно проверить правило."
+              showLineNumbers
             />
           </div>
 
@@ -361,6 +345,7 @@ export function JsonLogicPlaygroundModal({
               onChange={onRuleChange}
               onBeautify={() => onRuleChange(formatJsonSnippet(ruleText))}
               helperText="Укажите JsonLogic правило в формате JSON."
+              showLineNumbers
             />
           </div>
         </div>

@@ -2,10 +2,8 @@ package com.sber.yamlprocessor.graphql
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.ArrayNode
-import com.fasterxml.jackson.databind.node.JsonNodeFactory
 import com.fasterxml.jackson.databind.node.ObjectNode
 import com.fasterxml.jackson.dataformat.yaml.YAMLMapper
-import com.sber.yamlprocessor.export.ProcessConfigurationExportType
 import com.sber.yamlprocessor.model.Process
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -38,22 +36,15 @@ class ProcessConfigurationExportService(
     })
 
     @Transactional(readOnly = true)
-    fun exportProcessConfig(
-        id: Any?,
-        type: ProcessConfigurationExportType = ProcessConfigurationExportType.DEFAULT
-    ): ProcessConfigurationExport {
+    fun exportProcessConfig(id: Any?): ProcessConfigurationExport {
         val processConfig = crudService.findProcessConfigForExport(id)
         val process = processConfig.process ?: error("ProcessConfig ${processConfig.id} does not contain process")
         val yamlTree = objectMapper.valueToTree<ObjectNode>(process).deepCopy()
         stripTechnicalFields(yamlTree)
-        val exportTree = when (type) {
-            ProcessConfigurationExportType.DEFAULT -> yamlTree
-            ProcessConfigurationExportType.LEGACY -> wrapLegacyProcess(transformToLegacyTree(yamlTree))
-        }
 
         return ProcessConfigurationExport(
             filename = buildFilename(process),
-            content = yaml.dump(asYamlValue(exportTree))
+            content = yaml.dump(asYamlValue(yamlTree))
         )
     }
 
@@ -91,50 +82,6 @@ class ProcessConfigurationExportService(
             ?: nodeComment
                 ?.trim()
                 ?.takeIf { it.isNotEmpty() }
-
-    private fun wrapLegacyProcess(processNode: ObjectNode): ObjectNode =
-        JsonNodeFactory.instance.objectNode().set<ObjectNode>("process", processNode)
-
-    private fun transformToLegacyTree(node: ObjectNode): ObjectNode {
-        val transformed = node.deepCopy()
-        transformLegacyNode(transformed)
-        return transformed
-    }
-
-    private fun transformLegacyNode(node: com.fasterxml.jackson.databind.JsonNode?) {
-        when (node) {
-            is ObjectNode -> {
-                val description = node.get("node_name") ?: node.get("nodeName")
-                node.remove("id")
-                node.remove("node_name")
-                node.remove("nodeName")
-                node.remove("node_comment")
-                renameField(node, "duration_value", "durationValue")
-                renameField(node, "duration_unit", "durationUnit")
-                if (node.has("nodeComment")) {
-                    node.remove("nodeComment")
-                }
-                if (!node.has("description") && description != null && !description.isNull) {
-                    node.set<com.fasterxml.jackson.databind.JsonNode>("description", description)
-                }
-                node.fields().forEachRemaining { (_, value) ->
-                    transformLegacyNode(value)
-                }
-            }
-            is ArrayNode -> node.forEach(::transformLegacyNode)
-        }
-    }
-
-    private fun renameField(node: ObjectNode, source: String, target: String) {
-        if (!node.has(source)) {
-            return
-        }
-        val value = node.get(source)
-        node.remove(source)
-        if (!node.has(target) && value != null && !value.isNull) {
-            node.set<com.fasterxml.jackson.databind.JsonNode>(target, value)
-        }
-    }
 
     private fun asYamlValue(
         node: com.fasterxml.jackson.databind.JsonNode?,

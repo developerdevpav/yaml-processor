@@ -279,13 +279,16 @@ class JpaGraphQlRegistry(
     }
 
     private fun graphQlScalar(javaType: Class<*>): String = when (javaType) {
-        Boolean::class.java, Boolean::class.javaPrimitiveType -> "Boolean"
-        Int::class.java, Int::class.javaPrimitiveType,
-        Short::class.java, Short::class.javaPrimitiveType -> "Int"
-        Float::class.java, Float::class.javaPrimitiveType,
-        Double::class.java, Double::class.javaPrimitiveType,
+        Boolean::class.javaPrimitiveType, Boolean::class.javaObjectType -> "Boolean"
+        Int::class.javaPrimitiveType,
+        Int::class.javaObjectType,
+        Short::class.javaPrimitiveType, Short::class.javaObjectType -> "Int"
+        Float::class.javaPrimitiveType,
+        Float::class.javaObjectType,
+        Double::class.javaPrimitiveType,
+        Double::class.javaObjectType,
         java.math.BigDecimal::class.java -> "Float"
-        Long::class.java, Long::class.javaPrimitiveType -> "String"
+        Long::class.javaPrimitiveType, Long::class.javaObjectType -> "String"
         else -> "String"
     }
 

@@ -12,7 +12,7 @@ const triggerClassName = twMerge(
 );
 
 const popoverClassName =
-  'min-w-[--trigger-width] overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-[0_12px_32px_rgba(16,24,40,0.12)]';
+  'z-[360] min-w-[--trigger-width] overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-[0_12px_32px_rgba(16,24,40,0.12)]';
 
 const listBoxClassName = 'max-h-60 overflow-auto py-1 outline-none';
 

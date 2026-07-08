@@ -15,6 +15,8 @@ import com.sber.yamlprocessor.model.Service
 import com.sber.yamlprocessor.model.SlaStatusDictionary
 import com.sber.yamlprocessor.model.Stage
 import com.sber.yamlprocessor.model.Subprocess
+import graphql.schema.GraphQLInputObjectType
+import graphql.schema.GraphQLScalarType
 import jakarta.persistence.EntityManager
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
@@ -72,8 +74,12 @@ class JpaGraphQlSupportTest {
         assertTrue(schema.mutationType.fieldDefinitions.any { it.name == "createReverseOutputNode" })
         assertTrue(schema.mutationType.fieldDefinitions.any { it.name == "updateReverseOutputNode" })
         assertTrue(schema.mutationType.fieldDefinitions.any { it.name == "deleteReverseOutputNode" })
+        assertTrue(schema.mutationType.fieldDefinitions.any { it.name == "renameContextCodesDictionary" })
         assertNotNull(schema.getType("Parent"))
         assertNotNull(schema.getType("ParentInput"))
+
+        val parentInput = schema.getType("ParentInput") as GraphQLInputObjectType
+        assertEquals("Boolean", (parentInput.getFieldDefinition("include").type as GraphQLScalarType).name)
     }
 
     @Test
@@ -307,5 +313,35 @@ class JpaGraphQlSupportTest {
 
         val persisted = entityManager.find(Reverse::class.java, reverse.id)
         assertEquals(listOf("second", "first"), persisted.output.map { it.name })
+    }
+
+    @Test
+    @Transactional
+    fun `renames context code dictionary and rebinds process and stage references`() {
+        val oldCode = ContextCodesDictionary(code = "OLD_UI_CODE")
+        entityManager.persist(oldCode)
+        val processConfig = ProcessConfig()
+        val process = Process(processConfig = processConfig, contextCode = oldCode)
+        val subprocess = Subprocess(process = process)
+        val stage = Stage(subprocess = subprocess, executor = "executor.alpha", contextCode = oldCode)
+        val configurator = Configurator(stage = stage)
+        processConfig.process = process
+        process.subprocess = mutableListOf(subprocess)
+        subprocess.stages = mutableListOf(stage)
+        stage.configurator = configurator
+        entityManager.persist(processConfig)
+        entityManager.flush()
+
+        val renamed = crudService.renameContextCodesDictionary("OLD_UI_CODE", "NEW_UI_CODE")
+
+        assertEquals("NEW_UI_CODE", renamed.code)
+        entityManager.flush()
+        entityManager.clear()
+
+        val persistedProcess = entityManager.find(Process::class.java, process.id)
+        val persistedStage = entityManager.find(Stage::class.java, stage.id)
+        assertEquals("NEW_UI_CODE", persistedProcess.contextCode?.code)
+        assertEquals("NEW_UI_CODE", persistedStage.contextCode?.code)
+        assertNull(entityManager.find(ContextCodesDictionary::class.java, "OLD_UI_CODE"))
     }
 }

@@ -3,7 +3,7 @@
 
 :root {
   color: #101828;
-  background: linear-gradient(180deg, #f8fafc 0%, #f4f7fb 58%, #eef2f7 100%);
+  background: #f8fafc;
   font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
 }
 
@@ -65,38 +65,46 @@ body {
   overflow: hidden;
   border: 1px solid rgba(16, 24, 40, 0.08);
   border-radius: 1.5rem;
-  background: #ffffff;
+  background: #f8fafc;
   box-shadow: none;
 }
 
-.topology-stage-fullscreen {
-  width: 100%;
-  height: 100%;
-  padding: 1.5rem;
-  background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
-}
-
-.topology-canvas {
+.topology-layout {
   position: relative;
   width: 100%;
   height: 100%;
   min-height: 100%;
-  border: 0;
-  border-radius: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1rem;
+  background: #f8fafc;
+}
+
+.topology-canvas {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: 1px solid rgba(16, 24, 40, 0.08);
+  border-radius: 1rem;
   overflow: hidden;
   background: #ffffff;
   box-shadow: none;
 }
 
 .topology-toolbar {
-  position: absolute;
-  top: 1.5rem;
-  left: 1.5rem;
-  z-index: 4;
+  position: relative;
+  z-index: 80;
   display: flex;
   align-items: flex-start;
+  justify-content: space-between;
   gap: 0.75rem;
   flex-wrap: wrap;
+  padding: 0.75rem;
+  border: 1px solid rgba(16, 24, 40, 0.08);
+  border-radius: 1rem;
+  background: #ffffff;
 }
 
 .topology-toolbar__group {
@@ -104,17 +112,217 @@ body {
   align-items: center;
   gap: 0.75rem;
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 .topology-toolbar__select {
   width: min(20rem, calc(100vw - 11rem));
 }
 
-.topology-canvas__fullscreen {
+.topology-editor-mode {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem;
+  border: 1px solid rgba(16, 24, 40, 0.08);
+  border-radius: 0.85rem;
+  background: #f8fafc;
+}
+
+.topology-editor-mode__button {
+  min-height: 2.35rem;
+  padding: 0.45rem 0.8rem;
+  border: 0;
+  border-radius: 0.65rem;
+  background: transparent;
+  color: #475467;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.topology-editor-mode__button-active {
+  background: #ffffff;
+  color: #101828;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.08);
+}
+
+.topology-editor-mode__button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.topology-canvas-yaml {
+  padding: 0;
+}
+
+.yaml-process-editor {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: #ffffff;
+}
+
+.yaml-process-editor__header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid rgba(16, 24, 40, 0.08);
+}
+
+.yaml-process-editor__title {
+  color: #101828;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.yaml-process-editor__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.yaml-process-editor__status {
+  color: #667085;
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.yaml-process-editor__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 3.5rem minmax(0, 1fr);
+}
+
+.yaml-process-editor__line-numbers {
+  padding: 1rem 0.5rem;
+  color: #98a2b3;
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 0.86rem;
+  line-height: 1.6;
+  text-align: center;
+  user-select: none;
+  overflow: hidden;
+}
+
+.yaml-process-editor__line-number {
+  height: 1.6em;
+}
+
+.yaml-process-editor__input {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.yaml-process-editor__highlight {
   position: absolute;
-  top: 1.5rem;
-  right: 1.5rem;
-  z-index: 4;
+  inset: 0;
+  z-index: 0;
+  margin: 0;
+  padding: 1rem 1rem 1.25rem 0.5rem;
+  background: transparent;
+  color: #101828;
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 0.86rem;
+  line-height: 1.6;
+  overflow: auto;
+  pointer-events: none;
+  scrollbar-width: none;
+  tab-size: 2;
+  white-space: pre;
+}
+
+.yaml-process-editor__highlight::-webkit-scrollbar {
+  display: none;
+}
+
+.yaml-process-editor__highlight-line {
+  height: 1.6em;
+}
+
+.yaml-process-editor__textarea {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 1rem 1rem 1.25rem 0.5rem;
+  border: 0;
+  outline: none;
+  resize: none;
+  background: transparent;
+  caret-color: #101828;
+  color: transparent;
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 0.86rem;
+  line-height: 1.6;
+  white-space: pre;
+  overflow-wrap: normal;
+  tab-size: 2;
+  -webkit-text-fill-color: transparent;
+}
+
+.yaml-process-editor__textarea::selection {
+  background: rgba(127, 86, 217, 0.22);
+  -webkit-text-fill-color: transparent;
+}
+
+.yaml-process-editor__textarea:disabled {
+  caret-color: transparent;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+}
+
+.yaml-token-key {
+  color: #6941c6;
+  font-weight: 700;
+}
+
+.yaml-token-separator {
+  color: #98a2b3;
+}
+
+.yaml-token-marker {
+  color: #1570ef;
+  font-weight: 700;
+}
+
+.yaml-token-string {
+  color: #067647;
+}
+
+.yaml-token-number {
+  color: #b54708;
+}
+
+.yaml-token-literal {
+  color: #c11574;
+  font-weight: 700;
+}
+
+.yaml-token-comment {
+  color: #98a2b3;
+  font-style: italic;
+}
+
+.yaml-process-editor__error {
+  flex: 0 0 auto;
+  padding: 0.75rem 1rem;
+  border-top: 1px solid rgba(217, 45, 32, 0.12);
+  background: #fef3f2;
+  color: #b42318;
+  font-size: 0.82rem;
+  font-weight: 600;
+  line-height: 1.5;
 }
 
 .modal-shell {
@@ -179,6 +387,55 @@ body {
 .modal-card__footer {
   margin-top: 1.25rem;
   justify-content: flex-end;
+}
+
+.process-code-modal {
+  width: min(100%, 46rem);
+}
+
+.process-code-manager__create {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+}
+
+.process-code-manager__list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  max-height: min(52vh, 28rem);
+  margin-top: 1.25rem;
+  padding-right: 0.25rem;
+  overflow: auto;
+}
+
+.process-code-manager__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.process-code-manager__empty {
+  padding: 1rem;
+  border: 1px solid rgba(16, 24, 40, 0.08);
+  border-radius: 0.875rem;
+  background: #f8fafc;
+  color: #667085;
+  font-size: 0.9rem;
+}
+
+.process-code-manager__error {
+  margin-top: 1rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid rgba(217, 45, 32, 0.14);
+  border-radius: 0.875rem;
+  background: #fef3f2;
+  color: #b42318;
+  font-size: 0.86rem;
+  font-weight: 600;
+  line-height: 1.45;
 }
 
 .file-uploader {
@@ -268,33 +525,8 @@ body {
   font-size: 0.9rem;
 }
 
-.export-modal__hint {
-  margin-top: 1rem;
-  padding: 0.9rem 1rem;
-  border: 1px solid rgba(16, 24, 40, 0.08);
-  border-radius: 1rem;
-  background: #f8fafc;
-  color: #475467;
-  font-size: 0.92rem;
-  line-height: 1.45;
-}
-
 .topology-empty-state {
   text-align: center;
-}
-
-.topology-canvas .react-flow__controls {
-  border: 1px solid rgba(16, 24, 40, 0.08);
-  background: rgba(255, 255, 255, 0.94);
-  box-shadow: 0 12px 30px rgba(16, 24, 40, 0.12);
-  border-radius: 1rem;
-  overflow: hidden;
-}
-
-.topology-canvas .react-flow__controls-button {
-  background: transparent;
-  color: #344054;
-  border-bottom-color: rgba(16, 24, 40, 0.08);
 }
 
 .process-node {
@@ -307,9 +539,7 @@ body {
   border: 1.5px solid rgba(16, 24, 40, 0.08);
   border-radius: 1.35rem;
   background: rgba(255, 255, 255, 0.98);
-  box-shadow:
-    0 1px 2px rgba(16, 24, 40, 0.08),
-    0 12px 30px rgba(16, 24, 40, 0.14);
+  box-shadow: none;
   cursor: pointer;
   transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
 }
@@ -326,9 +556,7 @@ body {
 .process-node.selected,
 .react-flow__node.selected .process-node {
   border-color: #7f56d9;
-  box-shadow:
-    0 0 0 3px rgba(127, 86, 217, 0.14),
-    0 16px 32px rgba(16, 24, 40, 0.18);
+  box-shadow: 0 0 0 3px rgba(127, 86, 217, 0.14);
   transform: translateY(-1px);
 }
 
@@ -369,9 +597,7 @@ body {
   opacity: 0;
   transform: translateY(0.2rem);
   transition: opacity 140ms ease, transform 140ms ease, background-color 140ms ease, border-color 140ms ease;
-  box-shadow:
-    0 1px 2px rgba(16, 24, 40, 0.08),
-    0 8px 18px rgba(16, 24, 40, 0.12);
+  box-shadow: none;
 }
 
 .process-node__action-delete {
@@ -520,6 +746,19 @@ body {
   font-weight: 600;
 }
 
+.process-node__context-note {
+  margin-top: 0.55rem;
+  padding-right: 3.25rem;
+  color: #667085;
+  font-size: 0.76rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.process-node__context-note--reverse {
+  padding-top: 0.75rem;
+}
+
 .process-node--reverse-output {
   min-height: 0;
   height: auto;
@@ -577,13 +816,23 @@ body {
 }
 
 .process-node--result .process-node__summary {
-  margin-top: 1.25rem;
+  margin-top: 0.35rem;
+  margin-bottom: auto;
   grid-template-columns: minmax(0, 1fr);
   gap: 0.4rem;
 }
 
+.process-node--result .process-node__context-note {
+  padding-top: 0.75rem;
+}
+
+.process-node--result .process-node__hint {
+  margin-top: 0;
+}
+
 .process-node--reverse .process-node__summary {
-  margin-top: 1.1rem;
+  margin-top: 0.35rem;
+  margin-bottom: auto;
   grid-template-columns: minmax(0, 1fr);
 }
 
@@ -668,7 +917,7 @@ body {
   stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
-  filter: drop-shadow(0 1px 2px rgba(16, 24, 40, 0.08));
+  filter: none;
 }
 
 .process-list {
@@ -1062,6 +1311,31 @@ body {
   color: #101828;
 }
 
+.json-snippet__editor {
+  display: grid;
+  min-height: 16rem;
+}
+
+.json-snippet__editor-with-lines {
+  grid-template-columns: 3.25rem minmax(0, 1fr);
+}
+
+.json-snippet__line-numbers {
+  padding: 0.75rem 0.5rem 1rem;
+  background: transparent;
+  color: #98a2b3;
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  text-align: center;
+  user-select: none;
+  overflow: hidden;
+}
+
+.json-snippet__line-number {
+  height: 1.6em;
+}
+
 .json-snippet__textarea {
   width: 100%;
   min-height: 16rem;
@@ -1077,6 +1351,10 @@ body {
   white-space: pre;
   overflow-wrap: normal;
   tab-size: 2;
+}
+
+.json-snippet__editor-with-lines .json-snippet__textarea {
+  padding-left: 0.85rem;
 }
 
 .json-snippet__helper,
@@ -1110,6 +1388,16 @@ body {
 
 .json-snippet-fullscreen .json-snippet__toolbar {
   padding: 1rem 1rem 0;
+}
+
+.json-snippet-fullscreen .json-snippet__editor {
+  min-height: calc(100vh - 9rem);
+  height: calc(100vh - 9rem);
+}
+
+.json-snippet-fullscreen .json-snippet__line-numbers {
+  padding-top: 1rem;
+  font-size: 0.9rem;
 }
 
 .json-snippet-fullscreen .json-snippet__textarea {
@@ -1178,9 +1466,15 @@ body {
   flex-direction: column;
 }
 
+.modal-shell-playground .jsonlogic-playground__panel .json-snippet__editor {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 .modal-shell-playground .jsonlogic-playground__panel .json-snippet__textarea {
   flex: 1 1 auto;
   min-height: 0;
+  height: 100%;
   resize: none;
 }
 
@@ -1262,9 +1556,7 @@ body {
   border: 1px solid rgba(16, 24, 40, 0.08);
   border-radius: 1.6rem;
   background: rgba(255, 255, 255, 0.98);
-  box-shadow:
-    0 2px 8px rgba(16, 24, 40, 0.08),
-    0 32px 64px rgba(16, 24, 40, 0.16);
+  box-shadow: none;
   backdrop-filter: blur(18px);
   transform: translateX(calc(100% + 1rem));
   transition: transform 220ms ease;
@@ -1273,6 +1565,9 @@ body {
 
 .editor-drawer-open {
   transform: translateX(0);
+  box-shadow:
+    0 2px 8px rgba(16, 24, 40, 0.08),
+    0 32px 64px rgba(16, 24, 40, 0.16);
 }
 
 .editor-drawer__header {
@@ -1292,6 +1587,25 @@ body {
   color: #667085;
   font-size: 0.82rem;
   line-height: 1.45;
+}
+
+.editor-drawer__save-button {
+  width: fit-content;
+  padding: 0.25rem;
+  border: 0;
+  border-radius: 0.5rem;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.editor-drawer__save-button:hover:not(:disabled),
+.editor-drawer__save-button:focus-visible {
+  background: rgba(16, 24, 40, 0.06);
+}
+
+.editor-drawer__save-button:disabled {
+  cursor: default;
 }
 
 .editor-drawer__body {
@@ -1336,9 +1650,6 @@ body {
 
 @media (max-width: 768px) {
   .topology-toolbar {
-    top: 1rem;
-    left: 1rem;
-    right: 1rem;
     align-items: stretch;
   }
 
@@ -1350,9 +1661,27 @@ body {
     width: 100%;
   }
 
-  .topology-canvas__fullscreen {
-    top: 1rem;
-    right: 1rem;
+  .topology-editor-mode {
+    width: 100%;
+  }
+
+  .topology-editor-mode__button {
+    flex: 1;
+  }
+
+  .process-code-manager__create,
+  .process-code-manager__row {
+    grid-template-columns: 1fr;
+  }
+
+  .yaml-process-editor__header,
+  .yaml-process-editor__actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .yaml-process-editor__status {
+    white-space: normal;
   }
 
   .modal-shell-playground {

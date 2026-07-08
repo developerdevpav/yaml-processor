@@ -11,6 +11,8 @@ import org.springframework.http.MediaType
 import org.springframework.mock.web.MockMultipartFile
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.multipart
+import org.springframework.test.web.servlet.post
+import org.springframework.test.web.servlet.put
 import java.util.UUID
 
 @Suppress("UNCHECKED_CAST")
@@ -31,7 +33,7 @@ class ProcessConfigurationImportControllerTest {
         val processId = UUID.fromString("22222222-2222-2222-2222-222222222222")
         val file = MockMultipartFile("files", "process.yaml", "application/yaml", "process: {}\n".toByteArray())
 
-        given(importService.import(anyList(), eq(YamlImportScheme.NEW))).willReturn(
+        given(importService.import(anyList())).willReturn(
             listOf(
                 ImportedProcessConfig(
                     filename = "process.yaml",
@@ -44,7 +46,6 @@ class ProcessConfigurationImportControllerTest {
 
         mockMvc.multipart("/api/process-configs/import") {
             file(file)
-            param("scheme", "NEW")
             contentType = MediaType.MULTIPART_FORM_DATA
         }.andExpect {
             status { isOk() }
@@ -53,6 +54,55 @@ class ProcessConfigurationImportControllerTest {
             jsonPath("$.imported[0].process_config_id") { value(processConfigId.toString()) }
             jsonPath("$.imported[0].process_id") { value(processId.toString()) }
             jsonPath("$.imported[0].context_code") { value("PSPLUS") }
+        }
+    }
+
+    @Test
+    fun `replaces process config from yaml text`() {
+        val processConfigId = UUID.fromString("11111111-1111-1111-1111-111111111111")
+        val processId = UUID.fromString("22222222-2222-2222-2222-222222222222")
+        val yaml = "process:\n  context-code: PSPLUS\n"
+
+        given(importService.replaceProcessConfig(eq(processConfigId), eq(yaml))).willReturn(
+            ImportedProcessConfig(
+                filename = "process.yaml",
+                processConfigId = processConfigId,
+                processId = processId,
+                contextCode = "PSPLUS"
+            )
+        )
+
+        mockMvc.put("/api/process-configs/$processConfigId/yaml") {
+            content = yaml
+            contentType = MediaType.TEXT_PLAIN
+        }.andExpect {
+            status { isOk() }
+            content { contentType(MediaType.APPLICATION_JSON) }
+            jsonPath("$.filename") { value("process.yaml") }
+            jsonPath("$.process_config_id") { value(processConfigId.toString()) }
+            jsonPath("$.process_id") { value(processId.toString()) }
+            jsonPath("$.context_code") { value("PSPLUS") }
+        }
+    }
+
+    @Test
+    fun `beautifies yaml text`() {
+        val yaml = "process: {context-code: PSPLUS, subprocess: []}\n"
+        val beautifiedYaml = """
+            process:
+              context-code: PSPLUS
+              subprocess: []
+        """.trimIndent() + "\n"
+
+        given(importService.beautifyYaml(eq(yaml))).willReturn(beautifiedYaml)
+
+        mockMvc.post("/api/process-configs/yaml/beautify") {
+            content = yaml
+            contentType = MediaType.TEXT_PLAIN
+        }.andExpect {
+            status { isOk() }
+            content { contentTypeCompatibleWith(MediaType.TEXT_PLAIN) }
+            content { string(beautifiedYaml) }
         }
     }
 }

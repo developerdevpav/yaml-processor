@@ -4,6 +4,7 @@ import jakarta.persistence.EntityManager
 import com.sber.yamlprocessor.model.ParentMode
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
@@ -65,7 +66,7 @@ class ProcessConfigurationImportServiceTest {
             """.trimIndent().toByteArray()
         )
 
-        val imported = importService.import(listOf(file), YamlImportScheme.NEW).single()
+        val imported = importService.import(listOf(file)).single()
 
         val processConfig = entityManager.find(
             com.sber.yamlprocessor.model.ProcessConfig::class.java,
@@ -86,7 +87,7 @@ class ProcessConfigurationImportServiceTest {
     }
 
     @Test
-    fun `imports yaml process config in legacy scheme and maps descriptions into node comments`() {
+    fun `rejects legacy yaml process config`() {
         val file = MockMultipartFile(
             "files",
             "process.yaml",
@@ -94,49 +95,73 @@ class ProcessConfigurationImportServiceTest {
             """
             process:
               id: process_alpha
-              context-code: PSPLUS
               description: process comment
-              subprocess:
-                - id: subprocess_alpha
-                  description: subprocess comment
-                  trigger:
-                    rule: trigger.rule
-                  stages:
-                    - id: stage_alpha
-                      executor: executor.alpha
-                      description: stage comment
-                      configurator:
-                        filter-event-rule: payload != null
-                        result:
-                          - input-scenarios:
-                              - scenario_a
-                            reverse:
-                              - status: INITIATED
-                                output:
-                                  - phase: START
-                                    name: output_a
-                                    body:
-                                      type: SERVICE
-                                      service:
-                                        scenario: scenario_a
-                                    log:
-                                      journal-service-name: journal-service
+              subprocess: []
             """.trimIndent().toByteArray()
         )
 
-        val imported = importService.import(listOf(file), YamlImportScheme.LEGACY).single()
+        assertThrows(IllegalArgumentException::class.java) {
+            importService.import(listOf(file))
+        }
+    }
+
+    @Test
+    fun `replaces existing process config from yaml text`() {
+        val file = MockMultipartFile(
+            "files",
+            "process.yaml",
+            "application/yaml",
+            """
+            process:
+              context-code: PSPLUS
+              node_name: original_process
+              subprocess:
+                - node_name: original_subprocess
+            """.trimIndent().toByteArray()
+        )
+
+        val imported = importService.import(listOf(file)).single()
+
+        val replaced = importService.replaceProcessConfig(
+            imported.processConfigId,
+            """
+            process:
+              context-code: PSPLUS
+              node_name: replaced_process
+              node_comment: replaced comment
+              subprocess: []
+            """.trimIndent()
+        )
+
+        entityManager.flush()
+        entityManager.clear()
 
         val processConfig = entityManager.find(
             com.sber.yamlprocessor.model.ProcessConfig::class.java,
             imported.processConfigId
         )
 
+        assertEquals(imported.processConfigId, replaced.processConfigId)
+        assertEquals("PSPLUS", replaced.contextCode)
         assertNotNull(processConfig)
-        assertEquals("process_alpha", processConfig.process?.nodeName)
-        assertEquals("process comment", processConfig.process?.nodeComment)
-        assertEquals("subprocess_alpha", processConfig.process?.subprocess?.single()?.nodeName)
-        assertEquals("subprocess comment", processConfig.process?.subprocess?.single()?.nodeComment)
-        assertEquals("stage_alpha", processConfig.process?.subprocess?.single()?.stages?.single()?.nodeName)
-        assertEquals("stage comment", processConfig.process?.subprocess?.single()?.stages?.single()?.nodeComment)
+        assertEquals("replaced_process", processConfig.process?.nodeName)
+        assertEquals("replaced comment", processConfig.process?.nodeComment)
+        assertEquals("PSPLUS", processConfig.process?.contextCode?.code)
+        assertEquals(0, processConfig.process?.subprocess?.size)
+    }
+
+    @Test
+    fun `beautifies yaml text on server`() {
+        val beautified = importService.beautifyYaml("process: {context-code: PSPLUS, subprocess: [{node_name: alpha}]}\n")
+
+        assertEquals(
+            """
+            process:
+              context-code: PSPLUS
+              subprocess:
+                - node_name: alpha
+            """.trimIndent() + "\n",
+            beautified
+        )
     }
 }
