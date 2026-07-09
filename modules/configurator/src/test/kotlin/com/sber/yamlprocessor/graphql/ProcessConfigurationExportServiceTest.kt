@@ -1,6 +1,7 @@
 package com.sber.yamlprocessor.graphql
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.PropertyNamingStrategies
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import com.sber.yamlprocessor.model.Configurator
 import com.sber.yamlprocessor.model.Process
@@ -19,6 +20,7 @@ import com.sber.yamlprocessor.model.SlaStatusDictionary
 import com.sber.yamlprocessor.model.Stage
 import com.sber.yamlprocessor.model.Subprocess
 import com.sber.yamlprocessor.model.Trigger
+import com.sber.yamlprocessor.yaml.YamlFormattingService
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -28,8 +30,11 @@ import org.mockito.Mockito.mock
 class ProcessConfigurationExportServiceTest {
 
     private val crudService = mock(JpaGraphQlCrudService::class.java)
-    private val objectMapper: ObjectMapper = ObjectMapper().findAndRegisterModules().registerKotlinModule()
-    private val exportService = ProcessConfigurationExportService(crudService, objectMapper)
+    private val objectMapper: ObjectMapper = ObjectMapper()
+        .findAndRegisterModules()
+        .registerKotlinModule()
+        .setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
+    private val exportService = ProcessConfigurationExportService(crudService, objectMapper, YamlFormattingService())
 
     @Test
     fun `exports filter event rule as literal block scalar`() {
@@ -106,6 +111,8 @@ class ProcessConfigurationExportServiceTest {
         assertTrue(exported.content.contains("parent:"), exported.content)
         assertTrue(exported.content.contains("include: true"), exported.content)
         assertTrue(exported.content.contains("mode: SURFACE"), exported.content)
+        assertTrue(exported.content.contains("subprocess:\n  - node_name: subprocess_alpha"), exported.content)
+        assertTrue(exported.content.contains("log: {}"), exported.content)
         assertFalse(exported.content.contains("type: null"), exported.content)
         assertFalse(exported.content.contains("journal-service-name: null"), exported.content)
         assertFalse(exported.content.contains("status: null"), exported.content)

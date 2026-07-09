@@ -1,10 +1,25 @@
 import { gql, useMutation, useQuery } from '@apollo/client';
-import { CheckVerified02, Plus, Save01, Trash01, XCircle, XClose } from '@untitledui/icons';
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import {
+  CheckVerified02,
+  ChevronRight,
+  Download01,
+  Edit02,
+  File02,
+  Folder,
+  FolderPlus,
+  Inbox02,
+  Plus,
+  Save01,
+  Trash01,
+  XCircle,
+  XClose,
+} from '@untitledui/icons';
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { Position } from 'reactflow';
 import {
   FileUploadModal,
   ExportTypeModal,
+  FlowProcessPlaygroundModal,
   JsonLogicPlaygroundModal,
   JsonSnippetEditor,
   ProcessPlaygroundModal,
@@ -654,13 +669,13 @@ function getErrorDetails(error, fallback) {
   return sections.filter(Boolean).join('\n\n');
 }
 
-function createErrorInfo(error, fallback = 'Произошла ошибка.') {
+function createErrorInfo(error, fallback = 'Произошла ошибка.', options = {}) {
   const message = getErrorMessage(error, fallback) || fallback;
 
   return {
     id: createToastId(),
-    title: 'Ошибка',
-    message,
+    title: options.title || 'Ошибка',
+    message: options.message || message,
     details: getErrorDetails(error, fallback),
     occurredAt: new Date().toISOString(),
   };
@@ -711,6 +726,120 @@ function ErrorDetailsModal({ errorInfo, onClose }) {
   );
 }
 
+function AppDialogModal({ dialog, onResolve }) {
+  const [inputValue, setInputValue] = useState('');
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    if (!dialog) {
+      return;
+    }
+
+    setInputValue(dialog.defaultValue ?? '');
+    const focusTimeoutId = window.setTimeout(() => {
+      inputRef.current?.focus();
+      inputRef.current?.select?.();
+    }, 0);
+
+    return () => window.clearTimeout(focusTimeoutId);
+  }, [dialog]);
+
+  useEffect(() => {
+    if (!dialog) {
+      return undefined;
+    }
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        onResolve(dialog.type === 'prompt' ? null : false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [dialog, onResolve]);
+
+  if (!dialog) {
+    return null;
+  }
+
+  const isPrompt = dialog.type === 'prompt';
+  const isAlert = dialog.type === 'alert';
+  const titleId = `${dialog.id}-title`;
+  const descriptionId = `${dialog.id}-description`;
+  const cancelValue = isAlert ? true : isPrompt ? null : false;
+  const confirmText = dialog.confirmText ?? (isAlert ? 'Ок' : 'Подтвердить');
+  const cancelText = dialog.cancelText ?? 'Отмена';
+
+  const handleSubmit = (event) => {
+    event.preventDefault();
+    onResolve(isPrompt ? inputValue : true);
+  };
+
+  return (
+    <div
+      className="modal-shell app-dialog-modal"
+      role={dialog.variant === 'danger' ? 'alertdialog' : 'dialog'}
+      aria-modal="true"
+      aria-labelledby={titleId}
+      aria-describedby={descriptionId}
+    >
+      <div className="modal-shell__backdrop" onClick={() => onResolve(cancelValue)} />
+      <form className="modal-card app-dialog-modal__card" onSubmit={handleSubmit}>
+        <div className="modal-card__header">
+          <div>
+            <Title headingLevel="h4" className="modal-card__title" id={titleId}>
+              {dialog.title}
+            </Title>
+            {dialog.message && (
+              <p className="modal-card__subtitle app-dialog-modal__message" id={descriptionId}>
+                {dialog.message}
+              </p>
+            )}
+          </div>
+          <button
+            type="button"
+            className="modal-card__close"
+            onClick={() => onResolve(cancelValue)}
+            aria-label="Закрыть"
+          >
+            <XClose aria-hidden size={18} />
+          </button>
+        </div>
+
+        {isPrompt && (
+          <div className="app-dialog-modal__body">
+            <FormGroup label={dialog.inputLabel ?? dialog.title} fieldId={`${dialog.id}-input`}>
+              <input
+                ref={inputRef}
+                id={`${dialog.id}-input`}
+                className="app-dialog-modal__input"
+                value={inputValue}
+                onChange={(event) => setInputValue(event.target.value)}
+                placeholder={dialog.placeholder ?? ''}
+              />
+            </FormGroup>
+          </div>
+        )}
+
+        <div className="modal-card__footer">
+          {!isAlert && (
+            <Button type="button" variant="secondary" onClick={() => onResolve(cancelValue)}>
+              {cancelText}
+            </Button>
+          )}
+          <Button
+            type="submit"
+            className={dialog.variant === 'danger' ? 'app-dialog-modal__danger-button' : ''}
+          >
+            {confirmText}
+          </Button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function reorderItems(items, fromIndex, toIndex) {
   if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) {
     return items;
@@ -757,6 +886,109 @@ const DEFAULT_PROCESS_PLAYGROUND_TRIGGER = JSON.stringify(
 
 const PROCESS_PLAYGROUND_TRIGGER_HISTORY_KEY = 'yamlProcessor.processPlaygroundTriggerHistory.v1';
 const PROCESS_PLAYGROUND_TRIGGER_HISTORY_LIMIT = 12;
+const FLOW_PLAYBACK_STEP_DELAY_MS = 520;
+const PROCESS_TREE_STORAGE_KEY = 'yamlProcessor.processTree.v1';
+const ROOT_PROCESS_TREE_FOLDER_ID = 'root';
+const PROCESS_TREE_DRAG_TYPE = 'application/x-yaml-processor-process-config';
+
+function createProcessTreeFolderId() {
+  if (typeof window !== 'undefined' && window.crypto?.randomUUID) {
+    return `folder:${window.crypto.randomUUID()}`;
+  }
+
+  return `folder:${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function normalizeProcessTreeFolderName(value) {
+  return String(value ?? '').trim();
+}
+
+function normalizeProcessTreeState(rawState, processConfigs = []) {
+  const source = rawState && typeof rawState === 'object' ? rawState : {};
+  const foldersSource = Array.isArray(source.folders) ? source.folders : [];
+  const knownProcessIds = new Set((processConfigs ?? []).map((item) => String(item.id)).filter(Boolean));
+  const processIdsAreKnown = knownProcessIds.size > 0;
+  const folderIds = new Set([ROOT_PROCESS_TREE_FOLDER_ID]);
+  const folders = [];
+
+  foldersSource.forEach((folder) => {
+    const folderId = typeof folder?.id === 'string' ? folder.id : '';
+    if (!folderId || folderId === ROOT_PROCESS_TREE_FOLDER_ID || folderIds.has(folderId)) {
+      return;
+    }
+
+    folderIds.add(folderId);
+    folders.push({
+      id: folderId,
+      name: normalizeProcessTreeFolderName(folder.name) || 'Новая папка',
+      parentId: typeof folder.parentId === 'string' ? folder.parentId : ROOT_PROCESS_TREE_FOLDER_ID,
+    });
+  });
+
+  const normalizedFolders = folders.map((folder) => ({
+    ...folder,
+    parentId:
+      folder.parentId !== folder.id && folderIds.has(folder.parentId)
+        ? folder.parentId
+        : ROOT_PROCESS_TREE_FOLDER_ID,
+  }));
+  const normalizedFolderIds = new Set([
+    ROOT_PROCESS_TREE_FOLDER_ID,
+    ...normalizedFolders.map((folder) => folder.id),
+  ]);
+  const processFolders = {};
+
+  Object.entries(source.processFolders ?? {}).forEach(([processId, folderId]) => {
+    const normalizedProcessId = String(processId);
+    const normalizedFolderId = String(folderId);
+    if (processIdsAreKnown && !knownProcessIds.has(normalizedProcessId)) {
+      return;
+    }
+    if (!normalizedFolderIds.has(normalizedFolderId) || normalizedFolderId === ROOT_PROCESS_TREE_FOLDER_ID) {
+      return;
+    }
+
+    processFolders[normalizedProcessId] = normalizedFolderId;
+  });
+
+  return {
+    folders: normalizedFolders,
+    processFolders,
+  };
+}
+
+function readProcessTreeState() {
+  if (typeof window === 'undefined') {
+    return normalizeProcessTreeState(null);
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(PROCESS_TREE_STORAGE_KEY);
+    return normalizeProcessTreeState(rawValue ? JSON.parse(rawValue) : null);
+  } catch {
+    return normalizeProcessTreeState(null);
+  }
+}
+
+function writeProcessTreeState(state) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(PROCESS_TREE_STORAGE_KEY, JSON.stringify(normalizeProcessTreeState(state)));
+  } catch {
+    // Tree organization is a local convenience; failure to persist should not block process editing.
+  }
+}
+
+function getProcessConfigDisplayName(processConfig) {
+  return (
+    processConfig?.process?.nodeName?.trim() ||
+    processConfig?.process?.contextCode?.code?.trim() ||
+    'Process'
+  );
+}
 
 function getEventService(event) {
   return (
@@ -934,7 +1166,31 @@ function parseRegexpPattern(pattern) {
     return new RegExp(slashRegexp[1], slashRegexp[2]);
   }
 
+  if (
+    normalizedPattern.startsWith('^') ||
+    normalizedPattern.endsWith('$') ||
+    normalizedPattern.startsWith('(?')
+  ) {
+    return new RegExp(normalizedPattern);
+  }
+
   return null;
+}
+
+function globPatternToRegExp(pattern) {
+  const expression = Array.from(pattern)
+    .map((character) => {
+      if (character === '*') {
+        return '.*';
+      }
+      if (character === '?') {
+        return '.';
+      }
+      return character.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    })
+    .join('');
+
+  return new RegExp(`^${expression}$`);
 }
 
 function matchesScenarioPattern(pattern, scenario) {
@@ -950,7 +1206,10 @@ function matchesScenarioPattern(pattern, scenario) {
 
   try {
     const regexp = parseRegexpPattern(normalizedPattern);
-    return regexp ? regexp.test(normalizedScenario) : false;
+    if (regexp) {
+      return regexp.test(normalizedScenario);
+    }
+    return globPatternToRegExp(normalizedPattern).test(normalizedScenario);
   } catch {
     return false;
   }
@@ -1224,6 +1483,40 @@ async function buildProcessPlaygroundResult(processConfigs, trigger) {
   );
 
   return result;
+}
+
+function collectProcessPlaygroundExecutedNodeIds(result, processConfigId = null) {
+  const nodeIds = new Set();
+  const shouldIncludeProcess = (process) =>
+    !processConfigId || String(process?.processConfigId ?? '') === String(processConfigId);
+  const addNode = (item) => {
+    if (item?.nodeId) {
+      nodeIds.add(item.nodeId);
+    }
+  };
+
+  (result?.processes ?? []).forEach((process) => {
+    if (!shouldIncludeProcess(process)) {
+      return;
+    }
+
+    addNode(process);
+    (process.subprocesses ?? []).forEach((subprocess) => {
+      addNode(subprocess);
+      (subprocess.stages ?? []).forEach((stage) => {
+        addNode(stage);
+        (stage.scenarios ?? []).forEach((scenario) => {
+          addNode(scenario);
+          (scenario.statuses ?? []).forEach((status) => {
+            addNode(status);
+            (status.outputs ?? []).forEach(addNode);
+          });
+        });
+      });
+    });
+  });
+
+  return Array.from(nodeIds);
 }
 
 const NODE_NAME_HELPER_TEXT = 'Название узла нужно для визуальной идентификации на схеме и в редакторе.';
@@ -3571,6 +3864,330 @@ function NodeOrderEditor({ processConfig, selectedNodeId, onReorderStages, onReo
   );
 }
 
+function ProcessTreeSidebar({
+  processConfigs,
+  selectedProcessConfigId,
+  processTreeState,
+  expandedFolderIds,
+  onToggleFolder,
+  onCreateProcess,
+  onCreateFolder,
+  onRenameFolder,
+  onDeleteFolder,
+  onMoveProcess,
+  onSelectProcessConfig,
+  onImportProcessConfig,
+  onExportProcessConfig,
+  onDeleteProcessConfig,
+  isCreateProcessDisabled = false,
+}) {
+  const [dropTargetFolderId, setDropTargetFolderId] = useState(null);
+  const folders = processTreeState?.folders ?? [];
+  const processFolders = processTreeState?.processFolders ?? {};
+  const expandedFolderSet = useMemo(() => new Set(expandedFolderIds ?? []), [expandedFolderIds]);
+  const folderIds = useMemo(
+    () => new Set([ROOT_PROCESS_TREE_FOLDER_ID, ...folders.map((folder) => folder.id)]),
+    [folders],
+  );
+  const foldersByParent = useMemo(() => {
+    const next = new Map();
+    folders.forEach((folder) => {
+      const parentId = folderIds.has(folder.parentId) ? folder.parentId : ROOT_PROCESS_TREE_FOLDER_ID;
+      const current = next.get(parentId) ?? [];
+      current.push(folder);
+      next.set(parentId, current);
+    });
+
+    next.forEach((items) => {
+      items.sort((left, right) => left.name.localeCompare(right.name, 'ru'));
+    });
+
+    return next;
+  }, [folderIds, folders]);
+  const processesByFolder = useMemo(() => {
+    const next = new Map([[ROOT_PROCESS_TREE_FOLDER_ID, []]]);
+    processConfigs.forEach((processConfig) => {
+      const configuredFolderId = processFolders[String(processConfig.id)];
+      const folderId = folderIds.has(configuredFolderId) ? configuredFolderId : ROOT_PROCESS_TREE_FOLDER_ID;
+      const current = next.get(folderId) ?? [];
+      current.push(processConfig);
+      next.set(folderId, current);
+    });
+
+    next.forEach((items) => {
+      items.sort((left, right) => getProcessConfigDisplayName(left).localeCompare(getProcessConfigDisplayName(right), 'ru'));
+    });
+
+    return next;
+  }, [folderIds, processConfigs, processFolders]);
+
+  const handleDragStartProcess = (event, processConfigId) => {
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData(PROCESS_TREE_DRAG_TYPE, String(processConfigId));
+  };
+
+  const handleDragOverFolder = (event, folderId) => {
+    if (!Array.from(event.dataTransfer.types).includes(PROCESS_TREE_DRAG_TYPE)) {
+      return;
+    }
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    setDropTargetFolderId(folderId);
+  };
+
+  const handleDropOnFolder = (event, folderId) => {
+    const processConfigId = event.dataTransfer.getData(PROCESS_TREE_DRAG_TYPE);
+    if (!processConfigId) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    setDropTargetFolderId(null);
+    onMoveProcess(processConfigId, folderId);
+  };
+
+  const countProcessesInsideFolder = (folderId, visitedFolderIds = new Set()) => {
+    if (visitedFolderIds.has(folderId)) {
+      return 0;
+    }
+
+    const nextVisited = new Set(visitedFolderIds);
+    nextVisited.add(folderId);
+
+    return (
+      (processesByFolder.get(folderId) ?? []).length +
+      (foldersByParent.get(folderId) ?? []).reduce(
+        (sum, childFolder) => sum + countProcessesInsideFolder(childFolder.id, nextVisited),
+        0,
+      )
+    );
+  };
+
+  const folderHasChildren = (folderId) =>
+    (foldersByParent.get(folderId) ?? []).length > 0 || (processesByFolder.get(folderId) ?? []).length > 0;
+
+  const renderProcess = (processConfig, level) => {
+    const processConfigId = String(processConfig.id);
+    const isSelected = processConfigId === selectedProcessConfigId;
+    const label = getProcessConfigDisplayName(processConfig);
+
+    return (
+      <div
+        key={processConfigId}
+        className={cn('process-tree__process', isSelected && 'process-tree__process--active')}
+        style={{ paddingLeft: `${0.45 + level * 0.9 + (level > 0 ? 1.95 : 0)}rem` }}
+        draggable
+        onDragStart={(event) => handleDragStartProcess(event, processConfigId)}
+      >
+        <button
+          type="button"
+          className="process-tree__process-main"
+          onClick={() => onSelectProcessConfig(processConfigId)}
+        >
+          <File02 aria-hidden size={16} className="process-tree__item-icon" />
+          <span className="process-tree__item-text">
+            <span className="process-tree__item-title">{label}</span>
+          </span>
+        </button>
+        <button
+          type="button"
+          className="process-tree__process-action process-tree__process-action--export"
+          onClick={(event) => {
+            event.stopPropagation();
+            onExportProcessConfig(processConfigId);
+          }}
+          aria-label={`Экспортировать процесс ${label}`}
+          title="Экспортировать процесс"
+        >
+          <Download01 aria-hidden size={15} />
+        </button>
+        <button
+          type="button"
+          className="process-tree__process-action process-tree__process-action--delete"
+          onClick={(event) => {
+            event.stopPropagation();
+            onDeleteProcessConfig(processConfigId);
+          }}
+          aria-label={`Удалить процесс ${label}`}
+          title="Удалить процесс"
+        >
+          <Trash01 aria-hidden size={15} />
+        </button>
+      </div>
+    );
+  };
+
+  const renderFolder = (folder, level, visitedFolderIds = new Set()) => {
+    if (visitedFolderIds.has(folder.id)) {
+      return null;
+    }
+
+    const nextVisited = new Set(visitedFolderIds);
+    nextVisited.add(folder.id);
+    const childFolders = foldersByParent.get(folder.id) ?? [];
+    const folderProcesses = processesByFolder.get(folder.id) ?? [];
+    const isExpanded = expandedFolderSet.has(folder.id);
+    const processCount = countProcessesInsideFolder(folder.id);
+    const isDropTarget = dropTargetFolderId === folder.id;
+    const hasChildren = folderHasChildren(folder.id);
+
+    return (
+      <div key={folder.id} className="process-tree__folder" role="treeitem" aria-expanded={isExpanded}>
+        <div
+          className={cn('process-tree__folder-row', isDropTarget && 'process-tree__drop-target')}
+          style={{ paddingLeft: `${0.45 + level * 0.9}rem` }}
+          onDragOver={(event) => handleDragOverFolder(event, folder.id)}
+          onDragLeave={() => setDropTargetFolderId(null)}
+          onDrop={(event) => handleDropOnFolder(event, folder.id)}
+        >
+          <button
+            type="button"
+            className="process-tree__toggle"
+            onClick={() => onToggleFolder(folder.id)}
+            aria-label={isExpanded ? `Свернуть папку ${folder.name}` : `Раскрыть папку ${folder.name}`}
+          >
+            <ChevronRight aria-hidden size={14} className={cn('process-tree__toggle-icon', isExpanded && 'process-tree__toggle-icon--open')} />
+          </button>
+          <button type="button" className="process-tree__folder-name" onClick={() => onToggleFolder(folder.id)}>
+            <Folder aria-hidden size={16} className="process-tree__item-icon process-tree__item-icon--folder" />
+            <span className="process-tree__item-text">
+              <span className="process-tree__item-title">{folder.name}</span>
+            </span>
+          </button>
+          <div className="process-tree__folder-actions">
+            <button
+              type="button"
+              className="process-tree__icon-button"
+              onClick={() => onCreateFolder(folder.id)}
+              aria-label={`Создать подпапку в ${folder.name}`}
+              title="Создать подпапку"
+            >
+              <FolderPlus aria-hidden size={15} />
+            </button>
+            <button
+              type="button"
+              className="process-tree__icon-button"
+              onClick={() => onRenameFolder(folder.id)}
+              aria-label={`Переименовать папку ${folder.name}`}
+              title="Переименовать"
+            >
+              <Edit02 aria-hidden size={15} />
+            </button>
+            <button
+              type="button"
+              className="process-tree__icon-button process-tree__icon-button--danger"
+              onClick={() => onDeleteFolder(folder.id)}
+              disabled={hasChildren}
+              aria-label={`Удалить папку ${folder.name}`}
+              title={hasChildren ? 'Удалить можно только пустую папку' : 'Удалить'}
+            >
+              <Trash01 aria-hidden size={15} />
+            </button>
+          </div>
+          <span className="process-tree__counter">{processCount}</span>
+        </div>
+        {isExpanded && (
+          <div className="process-tree__children" role="group">
+            {childFolders.map((childFolder) => renderFolder(childFolder, level + 1, nextVisited))}
+            {folderProcesses.map((processConfig) => renderProcess(processConfig, level + 1))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const rootFolders = foldersByParent.get(ROOT_PROCESS_TREE_FOLDER_ID) ?? [];
+  const rootProcesses = processesByFolder.get(ROOT_PROCESS_TREE_FOLDER_ID) ?? [];
+  const rootProcessCount = processConfigs.length;
+  const isRootDropTarget = dropTargetFolderId === ROOT_PROCESS_TREE_FOLDER_ID;
+
+  return (
+    <div className="process-tree">
+      <div
+        className={cn('process-tree__root', isRootDropTarget && 'process-tree__drop-target')}
+        onDragOver={(event) => handleDragOverFolder(event, ROOT_PROCESS_TREE_FOLDER_ID)}
+        onDragLeave={() => setDropTargetFolderId(null)}
+        onDrop={(event) => handleDropOnFolder(event, ROOT_PROCESS_TREE_FOLDER_ID)}
+      >
+        <Inbox02 aria-hidden size={17} className="process-tree__item-icon" />
+        <div className="process-tree__root-title">
+          <span>Процессы</span>
+          <span>{rootProcessCount}</span>
+        </div>
+        <div className="process-tree__root-actions">
+          <button
+            type="button"
+            className="process-tree__icon-button process-tree__icon-button--strong"
+            onClick={onCreateProcess}
+            disabled={isCreateProcessDisabled}
+            aria-label="Создать процесс"
+            title="Создать процесс"
+          >
+            <svg
+              aria-hidden
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path
+                d="M20 10.5V6.8C20 5.11984 20 4.27976 19.673 3.63803C19.3854 3.07354 18.9265 2.6146 18.362 2.32698C17.7202 2 16.8802 2 15.2 2H8.8C7.11984 2 6.27976 2 5.63803 2.32698C5.07354 2.6146 4.6146 3.07354 4.32698 3.63803C4 4.27976 4 5.11984 4 6.8V17.2C4 18.8802 4 19.7202 4.32698 20.362C4.6146 20.9265 5.07354 21.3854 5.63803 21.673C6.27976 22 7.11984 22 8.8 22H12M14 11H8M10 15H8M16 7H8M18 21V15M15 18H21"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+          <button
+            type="button"
+            className="process-tree__icon-button process-tree__icon-button--strong"
+            onClick={() => onCreateFolder(ROOT_PROCESS_TREE_FOLDER_ID)}
+            aria-label="Создать папку"
+            title="Создать папку"
+          >
+            <FolderPlus aria-hidden size={16} />
+          </button>
+          <button
+            type="button"
+            className="process-tree__icon-button process-tree__icon-button--strong"
+            onClick={onImportProcessConfig}
+            aria-label="Импортировать процесс"
+            title="Импортировать процесс"
+          >
+            <svg
+              aria-hidden
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path
+                d="M20 12.5V6.8C20 5.11984 20 4.27976 19.673 3.63803C19.3854 3.07354 18.9265 2.6146 18.362 2.32698C17.7202 2 16.8802 2 15.2 2H8.8C7.11984 2 6.27976 2 5.63803 2.32698C5.07354 2.6146 4.6146 3.07354 4.32698 3.63803C4 4.27976 4 5.11984 4 6.8V17.2C4 18.8802 4 19.7202 4.32698 20.362C4.6146 20.9265 5.07354 21.3854 5.63803 21.673C6.27976 22 7.1198 22 8.79986 22H12.5M14 11H8M10 15H8M16 7H8M15 19L18 22M18 22L21 19M18 22V16"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div className="process-tree__content" role="tree" aria-label="Дерево процессов">
+        {rootFolders.map((folder) => renderFolder(folder, 0))}
+        {rootProcesses.map((processConfig) => renderProcess(processConfig, 0))}
+        {processConfigs.length === 0 && (
+          <div className="process-tree__empty">Нет процессов</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ProcessCodeManagerModal({
   isOpen,
   codes,
@@ -3866,6 +4483,7 @@ export function App() {
   const [errorDetails, setErrorDetails] = useState(null);
   const [isExportingProcessConfig, setIsExportingProcessConfig] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [exportProcessConfigId, setExportProcessConfigId] = useState(null);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isImportingProcessConfig, setIsImportingProcessConfig] = useState(false);
   const [isProcessCodeManagerOpen, setIsProcessCodeManagerOpen] = useState(false);
@@ -3891,13 +4509,69 @@ export function App() {
   const [processPlaygroundTrigger, setProcessPlaygroundTrigger] = useState(DEFAULT_PROCESS_PLAYGROUND_TRIGGER);
   const [processPlaygroundResult, setProcessPlaygroundResult] = useState(null);
   const [processPlaygroundError, setProcessPlaygroundError] = useState('');
+  const [isFlowProcessPlaygroundOpen, setIsFlowProcessPlaygroundOpen] = useState(false);
+  const [flowProcessPlaygroundTrigger, setFlowProcessPlaygroundTrigger] = useState(DEFAULT_PROCESS_PLAYGROUND_TRIGGER);
+  const [flowProcessPlaygroundError, setFlowProcessPlaygroundError] = useState('');
+  const [flowExecutedNodeIds, setFlowExecutedNodeIds] = useState([]);
+  const [flowPlaybackRequest, setFlowPlaybackRequest] = useState(null);
+  const [isFlowPlaybackRunning, setIsFlowPlaybackRunning] = useState(false);
+  const [isEvaluatingFlowProcessPlayground, setIsEvaluatingFlowProcessPlayground] = useState(false);
   const [processPlaygroundTriggerHistory, setProcessPlaygroundTriggerHistory] = useState([]);
   const [isEvaluatingProcessPlayground, setIsEvaluatingProcessPlayground] = useState(false);
+  const [processTreeState, setProcessTreeState] = useState(() => readProcessTreeState());
+  const [expandedProcessTreeFolderIds, setExpandedProcessTreeFolderIds] = useState([]);
   const [autosaveStatus, setAutosaveStatus] = useState(null);
+  const [appDialog, setAppDialog] = useState(null);
   const nodeEditorRef = useRef(null);
   const manualEditorSaveInFlightRef = useRef(false);
+  const appDialogResolverRef = useRef(null);
+  const flowPlaybackRunIdRef = useRef(0);
+
+  const getAppDialogCancelValue = (dialog) => {
+    if (!dialog || dialog.type === 'prompt') {
+      return null;
+    }
+    return dialog.type === 'alert' ? true : false;
+  };
+
+  const closeAppDialog = (value) => {
+    const resolver = appDialogResolverRef.current;
+    appDialogResolverRef.current = null;
+    setAppDialog(null);
+    resolver?.(value);
+  };
+
+  const openAppDialog = (dialogOptions) => new Promise((resolve) => {
+    if (appDialogResolverRef.current) {
+      appDialogResolverRef.current(getAppDialogCancelValue(appDialog));
+    }
+
+    appDialogResolverRef.current = resolve;
+    setAppDialog({
+      id: createToastId(),
+      title: dialogOptions.title ?? 'Подтверждение',
+      message: dialogOptions.message ?? '',
+      confirmText: dialogOptions.confirmText,
+      cancelText: dialogOptions.cancelText,
+      defaultValue: dialogOptions.defaultValue,
+      inputLabel: dialogOptions.inputLabel,
+      placeholder: dialogOptions.placeholder,
+      type: dialogOptions.type ?? 'confirm',
+      variant: dialogOptions.variant,
+    });
+  });
+
+  const showConfirmDialog = (dialogOptions) => openAppDialog({ type: 'confirm', ...dialogOptions });
+  const showPromptDialog = (dialogOptions) => openAppDialog({ type: 'prompt', ...dialogOptions });
+  const showAlertDialog = (dialogOptions) => openAppDialog({ type: 'alert', ...dialogOptions });
+
+  useEffect(() => () => {
+    appDialogResolverRef.current?.(null);
+    appDialogResolverRef.current = null;
+  }, []);
 
   const processConfigs = data?.processConfigList ?? [];
+  const processConfigIdSignature = processConfigs.map((item) => String(item.id)).join('|');
   const isInitialLoading = loading && processConfigs.length === 0;
   const phaseOptions = (data?.actionPhasesDictionaryList ?? []).map((item) => item.code).filter(Boolean);
   const b3StatusOptions = (data?.b3StatusDictionaryList ?? []).map((item) => item.code).filter(Boolean);
@@ -3906,14 +4580,6 @@ export function App() {
   const processCodeOptions = (data?.contextCodesDictionaryList ?? []).map((item) => item.code).filter(Boolean);
   const isProcessCodeManagerSubmitting =
     createContextCodeState.loading || renameContextCodeState.loading || deleteContextCodeState.loading;
-  const processConfigOptions = processConfigs.map((item) => {
-    const processName = item.process?.nodeName?.trim() || item.process?.contextCode?.code?.trim() || 'Process';
-
-    return {
-      value: item.id,
-      label: processName,
-    };
-  });
   const editorIsSaving =
     createSubprocessState.loading ||
     createStageState.loading ||
@@ -3965,6 +4631,61 @@ export function App() {
           : yamlEditorText
             ? 'YAML актуален'
             : '';
+
+  const resetFlowPlayback = () => {
+    flowPlaybackRunIdRef.current += 1;
+    setFlowPlaybackRequest(null);
+    setFlowExecutedNodeIds([]);
+    setIsFlowPlaybackRunning(false);
+    setIsEvaluatingFlowProcessPlayground(false);
+  };
+
+  useEffect(() => {
+    const nodeIds = flowPlaybackRequest?.nodeIds ?? [];
+    if (nodeIds.length === 0) {
+      setIsFlowPlaybackRunning(false);
+      return undefined;
+    }
+
+    const timeoutIds = [];
+    setFlowExecutedNodeIds([]);
+    setIsFlowPlaybackRunning(true);
+
+    nodeIds.forEach((nodeId, index) => {
+      timeoutIds.push(
+        window.setTimeout(() => {
+          setFlowExecutedNodeIds((current) => (current.includes(nodeId) ? current : [...current, nodeId]));
+          if (index === nodeIds.length - 1) {
+            setIsFlowPlaybackRunning(false);
+          }
+        }, index * FLOW_PLAYBACK_STEP_DELAY_MS),
+      );
+    });
+
+    return () => {
+      timeoutIds.forEach((timeoutId) => window.clearTimeout(timeoutId));
+    };
+  }, [flowPlaybackRequest]);
+
+  useEffect(() => {
+    setProcessTreeState((current) => normalizeProcessTreeState(current, processConfigs));
+  }, [processConfigIdSignature]);
+
+  useEffect(() => {
+    writeProcessTreeState(processTreeState);
+  }, [processTreeState]);
+
+  useEffect(() => {
+    const folderIds = new Set((processTreeState.folders ?? []).map((folder) => folder.id));
+    setExpandedProcessTreeFolderIds((current) => {
+      const next = current.filter((folderId) => folderIds.has(folderId));
+      if (next.length === 0 && folderIds.size > 0) {
+        return Array.from(folderIds);
+      }
+
+      return next.length === current.length ? current : next;
+    });
+  }, [processTreeState.folders]);
 
   async function loadYamlEditorContent(processConfig) {
     if (!processConfig?.id) {
@@ -4018,6 +4739,11 @@ export function App() {
       setExpandedNodeIds(getDefaultExpandedNodeIds(activeProcessConfig));
     }
   }, [activeProcessConfig, selectedConfigId]);
+
+  useEffect(() => {
+    resetFlowPlayback();
+    setFlowProcessPlaygroundError('');
+  }, [activeProcessConfig?.id]);
 
   useEffect(() => {
     if (processEditorMode !== 'YAML') {
@@ -4074,6 +4800,9 @@ export function App() {
       });
 
       const next = current.filter((nodeId) => validNodeIds.has(nodeId));
+      if (processNodeId && next.length === 0) {
+        return getDefaultExpandedNodeIds(activeProcessConfig);
+      }
       return next.length === current.length ? current : next;
     });
   }, [activeProcessConfig]);
@@ -4113,8 +4842,8 @@ export function App() {
     showSuccessToast('Изменения сохранены', 'Информация по node успешно обновлена.');
   };
 
-  const showErrorToast = (errorValue, fallback) => {
-    const errorInfo = createErrorInfo(errorValue, fallback);
+  const showErrorToast = (errorValue, fallback, options = {}) => {
+    const errorInfo = createErrorInfo(errorValue, fallback, options);
     if (!errorInfo.message) {
       return errorInfo;
     }
@@ -4130,8 +4859,8 @@ export function App() {
     return errorInfo;
   };
 
-  const reportError = (setErrorMessage, errorValue, fallback) => {
-    const errorInfo = showErrorToast(errorValue, fallback);
+  const reportError = (setErrorMessage, errorValue, fallback, options = {}) => {
+    const errorInfo = showErrorToast(errorValue, fallback, options);
     setErrorMessage?.(errorInfo.message);
     return errorInfo.message;
   };
@@ -4269,7 +4998,12 @@ export function App() {
       return false;
     }
 
-    const shouldDelete = window.confirm(`Удалить код процесса "${code}"?`);
+    const shouldDelete = await showConfirmDialog({
+      title: 'Удалить код процесса',
+      message: `Удалить код процесса "${code}"?`,
+      confirmText: 'Удалить',
+      variant: 'danger',
+    });
     if (!shouldDelete) {
       return false;
     }
@@ -4892,15 +5626,24 @@ export function App() {
     setOrderNodeId(null);
   };
 
-  const handleSelectProcessConfig = (configId) => {
+  const handleSelectProcessConfig = async (configId) => {
     if (processEditorMode === 'YAML' && hasYamlEditorChanges && configId !== selectedConfigId) {
-      const shouldSelect = window.confirm('Есть несохраненные изменения YAML. Перейти к другому процессу без сохранения?');
+      const shouldSelect = await showConfirmDialog({
+        title: 'Несохраненные изменения',
+        message: 'Есть несохраненные изменения YAML. Перейти к другому процессу без сохранения?',
+        confirmText: 'Перейти',
+      });
       if (!shouldSelect) {
         return;
       }
     }
 
+    const nextProcessConfig = processConfigs.find((processConfig) => processConfig.id === configId) ?? null;
+    const nextProcessNodeId = nextProcessConfig?.process?.id ? `process:${nextProcessConfig.process.id}` : null;
+
     setSelectedConfigId(configId || null);
+    setSelectedNodeId(nextProcessNodeId);
+    setExpandedNodeIds(getDefaultExpandedNodeIds(nextProcessConfig));
     setLocalProcessConfig(null);
     setEditorNodeId(null);
     setViewerNodeId(null);
@@ -4915,13 +5658,154 @@ export function App() {
     setIsExportModalOpen(false);
   };
 
-  const handleProcessEditorModeChange = (nextMode) => {
+  const handleToggleProcessTreeFolder = (folderId) => {
+    setExpandedProcessTreeFolderIds((current) =>
+      current.includes(folderId) ? current.filter((item) => item !== folderId) : [...current, folderId],
+    );
+  };
+
+  const handleCreateProcessTreeFolder = async (parentId = ROOT_PROCESS_TREE_FOLDER_ID) => {
+    const normalizedCurrent = normalizeProcessTreeState(processTreeState, processConfigs);
+    const folderIds = new Set([
+      ROOT_PROCESS_TREE_FOLDER_ID,
+      ...normalizedCurrent.folders.map((folder) => folder.id),
+    ]);
+    const normalizedParentId = folderIds.has(parentId) ? parentId : ROOT_PROCESS_TREE_FOLDER_ID;
+    const folderName = await showPromptDialog({
+      title: 'Название папки',
+      defaultValue: 'Новая папка',
+      inputLabel: 'Название папки',
+      confirmText: 'Создать',
+    });
+    if (folderName == null) {
+      return;
+    }
+
+    const normalizedName = normalizeProcessTreeFolderName(folderName);
+    if (!normalizedName) {
+      const errorMessage = 'Название папки не должно быть пустым.';
+      showErrorToast(errorMessage, errorMessage);
+      return;
+    }
+
+    const nextFolder = {
+      id: createProcessTreeFolderId(),
+      name: normalizedName,
+      parentId: normalizedParentId,
+    };
+
+    setProcessTreeState({
+      ...normalizedCurrent,
+      folders: [...normalizedCurrent.folders, nextFolder],
+    });
+    setExpandedProcessTreeFolderIds((current) =>
+      Array.from(new Set([...current, normalizedParentId, nextFolder.id].filter((id) => id !== ROOT_PROCESS_TREE_FOLDER_ID))),
+    );
+  };
+
+  const handleRenameProcessTreeFolder = async (folderId) => {
+    const normalizedCurrent = normalizeProcessTreeState(processTreeState, processConfigs);
+    const targetFolder = normalizedCurrent.folders.find((folder) => folder.id === folderId);
+    if (!targetFolder) {
+      return;
+    }
+
+    const folderName = await showPromptDialog({
+      title: 'Название папки',
+      defaultValue: targetFolder.name,
+      inputLabel: 'Название папки',
+      confirmText: 'Сохранить',
+    });
+    if (folderName == null) {
+      return;
+    }
+
+    const normalizedName = normalizeProcessTreeFolderName(folderName);
+    if (!normalizedName) {
+      const errorMessage = 'Название папки не должно быть пустым.';
+      showErrorToast(errorMessage, errorMessage);
+      return;
+    }
+
+    setProcessTreeState({
+      ...normalizedCurrent,
+      folders: normalizedCurrent.folders.map((folder) =>
+        folder.id === folderId ? { ...folder, name: normalizedName } : folder,
+      ),
+    });
+  };
+
+  const handleDeleteProcessTreeFolder = async (folderId) => {
+    const normalizedCurrent = normalizeProcessTreeState(processTreeState, processConfigs);
+    const targetFolder = normalizedCurrent.folders.find((folder) => folder.id === folderId);
+    if (!targetFolder) {
+      return;
+    }
+
+    const hasChildFolders = normalizedCurrent.folders.some((folder) => folder.parentId === folderId);
+    const hasProcesses = Object.values(normalizedCurrent.processFolders).some((assignedFolderId) => assignedFolderId === folderId);
+    if (hasChildFolders || hasProcesses) {
+      const errorMessage = 'Удалить можно только пустую папку.';
+      showErrorToast(errorMessage, errorMessage);
+      return;
+    }
+
+    const shouldDelete = await showConfirmDialog({
+      title: 'Удалить папку',
+      message: `Удалить папку "${targetFolder.name}"?`,
+      confirmText: 'Удалить',
+      variant: 'danger',
+    });
+    if (!shouldDelete) {
+      return;
+    }
+
+    setProcessTreeState({
+      ...normalizedCurrent,
+      folders: normalizedCurrent.folders.filter((folder) => folder.id !== folderId),
+    });
+    setExpandedProcessTreeFolderIds((current) => current.filter((item) => item !== folderId));
+  };
+
+  const handleMoveProcessTreeProcess = (processConfigId, targetFolderId) => {
+    const normalizedProcessConfigId = String(processConfigId);
+    const processExists = processConfigs.some((processConfig) => String(processConfig.id) === normalizedProcessConfigId);
+    if (!processExists) {
+      return;
+    }
+
+    const normalizedCurrent = normalizeProcessTreeState(processTreeState, processConfigs);
+    const folderIds = new Set([
+      ROOT_PROCESS_TREE_FOLDER_ID,
+      ...normalizedCurrent.folders.map((folder) => folder.id),
+    ]);
+    const normalizedTargetFolderId = folderIds.has(targetFolderId) ? targetFolderId : ROOT_PROCESS_TREE_FOLDER_ID;
+    const processFolders = { ...normalizedCurrent.processFolders };
+
+    if (normalizedTargetFolderId === ROOT_PROCESS_TREE_FOLDER_ID) {
+      delete processFolders[normalizedProcessConfigId];
+    } else {
+      processFolders[normalizedProcessConfigId] = normalizedTargetFolderId;
+      setExpandedProcessTreeFolderIds((current) => Array.from(new Set([...current, normalizedTargetFolderId])));
+    }
+
+    setProcessTreeState({
+      ...normalizedCurrent,
+      processFolders,
+    });
+  };
+
+  const handleProcessEditorModeChange = async (nextMode) => {
     if (nextMode === processEditorMode) {
       return;
     }
 
     if (processEditorMode === 'YAML' && hasYamlEditorChanges) {
-      const shouldSwitch = window.confirm('Есть несохраненные изменения YAML. Перейти без сохранения?');
+      const shouldSwitch = await showConfirmDialog({
+        title: 'Несохраненные изменения',
+        message: 'Есть несохраненные изменения YAML. Перейти без сохранения?',
+        confirmText: 'Перейти',
+      });
       if (!shouldSwitch) {
         return;
       }
@@ -4942,7 +5826,11 @@ export function App() {
     }
 
     if (hasYamlEditorChanges) {
-      const shouldReload = window.confirm('Есть несохраненные изменения YAML. Обновить текст с сервера?');
+      const shouldReload = await showConfirmDialog({
+        title: 'Несохраненные изменения',
+        message: 'Есть несохраненные изменения YAML. Обновить текст с сервера?',
+        confirmText: 'Обновить',
+      });
       if (!shouldReload) {
         return;
       }
@@ -5043,12 +5931,23 @@ export function App() {
     }
   };
 
-  const handleOpenExportModal = () => {
-    if (!activeProcessConfig?.id || isExportingProcessConfig) {
+  const handleOpenExportModal = (targetProcessConfigId) => {
+    const processConfigId =
+      typeof targetProcessConfigId === 'string' ? targetProcessConfigId : activeProcessConfig?.id;
+
+    if (!processConfigId || isExportingProcessConfig) {
       return;
     }
 
+    const targetProcessConfig = processConfigs.find((processConfig) => String(processConfig.id) === processConfigId);
+    if (targetProcessConfig) {
+      setSelectedConfigId(targetProcessConfig.id);
+      setLocalProcessConfig(targetProcessConfig);
+      setSelectedNodeId(targetProcessConfig.process?.id ? `process:${targetProcessConfig.process.id}` : null);
+    }
+
     setExportErrorMessage('');
+    setExportProcessConfigId(processConfigId);
     setIsExportModalOpen(true);
   };
 
@@ -5058,11 +5957,17 @@ export function App() {
     }
 
     setIsExportModalOpen(false);
+    setExportProcessConfigId(null);
     setExportErrorMessage('');
   };
 
   const handleExportProcessConfig = async () => {
-    if (!activeProcessConfig?.id || isExportingProcessConfig) {
+    const processConfigId = exportProcessConfigId ?? activeProcessConfig?.id;
+    const targetProcessConfig =
+      processConfigs.find((processConfig) => String(processConfig.id) === String(processConfigId)) ??
+      (String(activeProcessConfig?.id) === String(processConfigId) ? activeProcessConfig : null);
+
+    if (!processConfigId || isExportingProcessConfig) {
       return;
     }
 
@@ -5070,7 +5975,7 @@ export function App() {
       setExportErrorMessage('');
       setIsExportingProcessConfig(true);
 
-      const response = await fetch(`/api/process-configs/${activeProcessConfig.id}/export`);
+      const response = await fetch(`/api/process-configs/${processConfigId}/export`);
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(errorText || `HTTP ${response.status}`);
@@ -5078,7 +5983,7 @@ export function App() {
 
       const filename =
         getFilenameFromContentDisposition(response.headers.get('content-disposition')) ||
-        `${activeProcessConfig.process?.contextCode?.code || 'process'}.yaml`;
+        `${targetProcessConfig?.process?.contextCode?.code || 'process'}.yaml`;
       const blob = await response.blob();
       downloadBlob(blob, filename);
       handleCloseExportModal();
@@ -5089,18 +5994,27 @@ export function App() {
     }
   };
 
-  const handleDeleteProcessConfig = async () => {
-    if (!activeProcessConfig?.id || deleteProcessConfigState.loading) {
+  const handleDeleteProcessConfig = async (targetProcessConfigId = activeProcessConfig?.id) => {
+    const processConfigId =
+      typeof targetProcessConfigId === 'string' ? targetProcessConfigId : activeProcessConfig?.id;
+
+    if (!processConfigId || deleteProcessConfigState.loading) {
       return;
     }
 
+    const targetProcessConfig =
+      processConfigs.find((processConfig) => String(processConfig.id) === processConfigId) ??
+      (String(activeProcessConfig?.id) === processConfigId ? activeProcessConfig : null);
     const processLabel =
-      activeProcessConfig.process?.contextCode?.code ||
-      activeProcessConfig.process?.nodeName ||
-      activeProcessConfig.id;
-    const shouldDelete = window.confirm(
-      `Удалить процесс "${processLabel}"?\nБудет удален весь process config со всеми subprocess, stage, configurator, result, reverse и output.`,
-    );
+      targetProcessConfig?.process?.nodeName ||
+      targetProcessConfig?.process?.contextCode?.code ||
+      processConfigId;
+    const shouldDelete = await showConfirmDialog({
+      title: 'Удалить процесс',
+      message: `Удалить процесс "${processLabel}"?\nБудет удален весь process config со всеми subprocess, stage, configurator, result, reverse и output.`,
+      confirmText: 'Удалить',
+      variant: 'danger',
+    });
     if (!shouldDelete) {
       return;
     }
@@ -5109,18 +6023,31 @@ export function App() {
       setUpdateErrorMessage('');
       await deleteProcessConfig({
         variables: {
-          id: activeProcessConfig.id,
+          id: processConfigId,
         },
       });
-      setSelectedConfigId(null);
-      setSelectedNodeId(null);
-      setEditorNodeId(null);
-      setViewerNodeId(null);
-      setOrderNodeId(null);
-      setLocalProcessConfig(null);
-      setEditorPreview(null);
-      setIsEditorOpen(false);
-      setExpandedNodeIds([]);
+      setProcessTreeState((currentState) => {
+        const normalizedState = normalizeProcessTreeState(currentState, processConfigs);
+        const processFolders = { ...normalizedState.processFolders };
+        delete processFolders[processConfigId];
+
+        return {
+          ...normalizedState,
+          processFolders,
+        };
+      });
+
+      if (String(activeProcessConfig?.id) === processConfigId) {
+        setSelectedConfigId(null);
+        setSelectedNodeId(null);
+        setEditorNodeId(null);
+        setViewerNodeId(null);
+        setOrderNodeId(null);
+        setLocalProcessConfig(null);
+        setEditorPreview(null);
+        setIsEditorOpen(false);
+        setExpandedNodeIds([]);
+      }
       await refetch();
       showSuccessToast('Процесс удален', `Процесс "${processLabel}" удален вместе со всей вложенной конфигурацией.`);
     } catch (mutationError) {
@@ -5176,6 +6103,23 @@ export function App() {
     setProcessPlaygroundResult(null);
     setProcessPlaygroundTrigger((current) => formatJsonSnippet(current || DEFAULT_PROCESS_PLAYGROUND_TRIGGER));
     setIsProcessPlaygroundOpen(true);
+  };
+
+  const handleOpenCurrentProcessPlayground = () => {
+    setFlowProcessPlaygroundError('');
+    setFlowProcessPlaygroundTrigger((current) =>
+      formatJsonSnippet(current || processPlaygroundTrigger || DEFAULT_PROCESS_PLAYGROUND_TRIGGER),
+    );
+    setIsFlowProcessPlaygroundOpen(true);
+  };
+
+  const handleCloseFlowProcessPlayground = () => {
+    if (isEvaluatingFlowProcessPlayground) {
+      return;
+    }
+
+    setIsFlowProcessPlaygroundOpen(false);
+    setFlowProcessPlaygroundError('');
   };
 
   const handleCloseProcessPlayground = () => {
@@ -5235,7 +6179,9 @@ export function App() {
       const payload = await response.json();
       setJsonLogicPlaygroundResult(stringifyJsonForEditor(payload?.result));
     } catch (requestError) {
-      reportError(setJsonLogicPlaygroundError, requestError, 'Не удалось проверить JsonLogic правило.');
+      reportError(setJsonLogicPlaygroundError, requestError, 'Не удалось проверить JsonLogic правило.', {
+        message: 'Произошла ошибка в Playground JsonLogic. Нажмите, чтобы открыть лог.',
+      });
       setJsonLogicPlaygroundResult('');
     } finally {
       setIsEvaluatingJsonLogic(false);
@@ -5256,19 +6202,89 @@ export function App() {
       const playgroundProcessConfigs = (processConfigs ?? []).map((processConfig) =>
         workingProcessConfig?.id && processConfig.id === workingProcessConfig.id ? workingProcessConfig : processConfig,
       );
+
       const playgroundResult = await buildProcessPlaygroundResult(playgroundProcessConfigs, parsedTrigger);
       setProcessPlaygroundTrigger(normalizedTriggerText);
       setProcessPlaygroundResult(playgroundResult);
+
       setProcessPlaygroundTriggerHistory((current) => {
         const next = upsertProcessPlaygroundTriggerHistoryItem(current, parsedTrigger, normalizedTriggerText);
         writeProcessPlaygroundTriggerHistory(next);
         return next;
       });
     } catch (requestError) {
-      reportError(setProcessPlaygroundError, requestError, 'Не удалось проиграть процессы.');
+      reportError(setProcessPlaygroundError, requestError, 'Не удалось проиграть процессы.', {
+        message: 'Произошла ошибка в Playground процесса. Нажмите, чтобы открыть лог.',
+      });
       setProcessPlaygroundResult(null);
     } finally {
       setIsEvaluatingProcessPlayground(false);
+    }
+  };
+
+  const handleEvaluateFlowProcessPlayground = async () => {
+    let parsedTrigger;
+    let normalizedTriggerText;
+
+    try {
+      parsedTrigger = JSON.parse(flowProcessPlaygroundTrigger || '{}');
+      if (!Array.isArray(parsedTrigger.events)) {
+        throw new Error('Trigger должен содержать массив events.');
+      }
+      normalizedTriggerText = stringifyJsonForEditor(parsedTrigger);
+    } catch (validationError) {
+      setFlowProcessPlaygroundError(getErrorMessage(validationError, 'Trigger должен быть валидным JSON.'));
+      return;
+    }
+
+    resetFlowPlayback();
+    const runId = flowPlaybackRunIdRef.current;
+    setFlowProcessPlaygroundError('');
+    setIsFlowProcessPlaygroundOpen(false);
+    setIsEvaluatingFlowProcessPlayground(true);
+    setFlowProcessPlaygroundTrigger(normalizedTriggerText);
+    setProcessPlaygroundTrigger(normalizedTriggerText);
+
+    try {
+      if (!workingProcessConfig?.process) {
+        throw new Error('Не выбран текущий процесс.');
+      }
+
+      const playgroundResult = await buildProcessPlaygroundResult([workingProcessConfig], parsedTrigger);
+      if (flowPlaybackRunIdRef.current !== runId) {
+        return;
+      }
+
+      const playbackNodeIds = collectProcessPlaygroundExecutedNodeIds(playgroundResult, activeProcessConfig?.id);
+      setProcessPlaygroundTriggerHistory((current) => {
+        const next = upsertProcessPlaygroundTriggerHistoryItem(current, parsedTrigger, normalizedTriggerText);
+        writeProcessPlaygroundTriggerHistory(next);
+        return next;
+      });
+
+      if (playbackNodeIds.length === 0) {
+        showSuccessToast('Путь не найден', 'Текущий процесс не обработал Trigger.');
+        return;
+      }
+
+      setFlowPlaybackRequest({
+        id: `${runId}-${Date.now()}`,
+        nodeIds: playbackNodeIds,
+      });
+    } catch (requestError) {
+      if (flowPlaybackRunIdRef.current !== runId) {
+        return;
+      }
+
+      setFlowPlaybackRequest(null);
+      setFlowExecutedNodeIds([]);
+      showErrorToast(requestError, 'Не удалось проиграть текущий процесс.', {
+        message: 'Произошла ошибка при запуске Playground текущего процесса. Нажмите, чтобы открыть лог.',
+      });
+    } finally {
+      if (flowPlaybackRunIdRef.current === runId) {
+        setIsEvaluatingFlowProcessPlayground(false);
+      }
     }
   };
 
@@ -5287,7 +6303,19 @@ export function App() {
     writeProcessPlaygroundTriggerHistory([]);
   };
 
-  const handleSelectProcessPlaygroundNode = (targetNode) => {
+  const handleRemoveProcessPlaygroundTriggerHistoryItem = (item) => {
+    if (!item?.id) {
+      return;
+    }
+
+    setProcessPlaygroundTriggerHistory((current) => {
+      const next = (current ?? []).filter((currentItem) => currentItem.id !== item.id);
+      writeProcessPlaygroundTriggerHistory(next);
+      return next;
+    });
+  };
+
+  const handleSelectProcessPlaygroundNode = async (targetNode) => {
     const playgroundProcessConfigs = (processConfigs ?? []).map((processConfig) =>
       workingProcessConfig?.id && processConfig.id === workingProcessConfig.id ? workingProcessConfig : processConfig,
     );
@@ -5295,12 +6323,18 @@ export function App() {
 
     if (!target) {
       const errorMessage = 'Не удалось найти node в React Flow.';
-      reportError(setProcessPlaygroundError, errorMessage, errorMessage);
+      reportError(setProcessPlaygroundError, errorMessage, errorMessage, {
+        message: 'Произошла ошибка в Playground процесса. Нажмите, чтобы открыть лог.',
+      });
       return;
     }
 
     if (processEditorMode === 'YAML' && hasYamlEditorChanges) {
-      const shouldSwitch = window.confirm('Есть несохраненные изменения YAML. Перейти к node в React Flow без сохранения?');
+      const shouldSwitch = await showConfirmDialog({
+        title: 'Несохраненные изменения',
+        message: 'Есть несохраненные изменения YAML. Перейти к node в React Flow без сохранения?',
+        confirmText: 'Перейти',
+      });
       if (!shouldSwitch) {
         return;
       }
@@ -5309,7 +6343,7 @@ export function App() {
     }
 
     setProcessPlaygroundError('');
-    setProcessEditorMode('VISUAL');
+    setProcessEditorMode(processEditorMode === 'FLOW' ? 'FLOW' : 'VISUAL');
     setSelectedConfigId(target.processConfigId);
     setSelectedNodeId(target.nodeId);
     setEditorNodeId(null);
@@ -5548,7 +6582,25 @@ export function App() {
           {!isInitialLoading && !error && activeProcessConfig && (
             <ProcessTopology
               processConfig={workingProcessConfig}
-              processConfigOptions={processConfigOptions}
+              processTreeSidebar={
+                <ProcessTreeSidebar
+                  processConfigs={processConfigs}
+                  selectedProcessConfigId={activeProcessConfig?.id ?? ''}
+                  processTreeState={processTreeState}
+                  expandedFolderIds={expandedProcessTreeFolderIds}
+                  onToggleFolder={handleToggleProcessTreeFolder}
+                  onCreateProcess={handleCreateProcess}
+                  onCreateFolder={handleCreateProcessTreeFolder}
+                  onRenameFolder={handleRenameProcessTreeFolder}
+                  onDeleteFolder={handleDeleteProcessTreeFolder}
+                  onMoveProcess={handleMoveProcessTreeProcess}
+                  onSelectProcessConfig={handleSelectProcessConfig}
+                  onImportProcessConfig={handleOpenImportModal}
+                  onExportProcessConfig={handleOpenExportModal}
+                  onDeleteProcessConfig={handleDeleteProcessConfig}
+                  isCreateProcessDisabled={processCodeOptions.length === 0 || createState.loading}
+                />
+              }
               selectedProcessConfigId={activeProcessConfig?.id ?? ''}
               selectedNodeId={selectedNodeId}
               expandedNodeIds={expandedNodeIds}
@@ -5562,13 +6614,15 @@ export function App() {
               onDeleteNode={handleDeleteNode}
               onAddChildNode={handleAddChildNode}
               onAddSubprocess={handleAddSubprocess}
-              onCreateProcess={handleCreateProcess}
-              onDeleteProcessConfig={handleDeleteProcessConfig}
               onOpenProcessCodeManager={handleOpenProcessCodeManager}
-              onImportProcessConfig={handleOpenImportModal}
-              onExportProcessConfig={handleOpenExportModal}
               onOpenJsonLogicPlayground={handleOpenStandaloneJsonLogicPlayground}
               onOpenProcessPlayground={handleOpenProcessPlayground}
+              onOpenCurrentProcessPlayground={handleOpenCurrentProcessPlayground}
+              onResetCurrentProcessPlayground={resetFlowPlayback}
+              executedNodeIds={flowExecutedNodeIds}
+              isCurrentProcessPlaygroundRunning={isEvaluatingFlowProcessPlayground}
+              isFlowPlaybackRunning={isFlowPlaybackRunning}
+              hasCurrentProcessPlayback={flowExecutedNodeIds.length > 0 || Boolean(flowPlaybackRequest?.nodeIds?.length)}
               focusRequest={topologyFocusRequest}
               onSelectProcessConfig={handleSelectProcessConfig}
               editorMode={processEditorMode}
@@ -5584,11 +6638,6 @@ export function App() {
               yamlEditorError={yamlEditorError}
               yamlEditorStatus={yamlEditorStatus}
               hasYamlEditorChanges={hasYamlEditorChanges}
-              isCreateDisabled={processCodeOptions.length === 0}
-              isCreating={createState.loading}
-              isDeleting={deleteProcessConfigState.loading}
-              isImporting={isImportingProcessConfig}
-              isExporting={isExportingProcessConfig}
               buildTopologyModel={buildTopologyModel}
             />
           )}
@@ -5749,13 +6798,22 @@ export function App() {
             triggerHistory={processPlaygroundTriggerHistory}
             result={processPlaygroundResult}
             isSubmitting={isEvaluatingProcessPlayground}
-            errorMessage={processPlaygroundError}
             onClose={handleCloseProcessPlayground}
             onTriggerChange={setProcessPlaygroundTrigger}
             onEvaluate={handleEvaluateProcessPlayground}
             onSelectTriggerHistoryItem={handleSelectProcessPlaygroundTriggerHistoryItem}
             onClearTriggerHistory={handleClearProcessPlaygroundTriggerHistory}
+            onRemoveTriggerHistoryItem={handleRemoveProcessPlaygroundTriggerHistoryItem}
             onSelectNode={handleSelectProcessPlaygroundNode}
+          />
+          <FlowProcessPlaygroundModal
+            isOpen={isFlowProcessPlaygroundOpen}
+            triggerText={flowProcessPlaygroundTrigger}
+            isSubmitting={isEvaluatingFlowProcessPlayground}
+            errorMessage={flowProcessPlaygroundError}
+            onClose={handleCloseFlowProcessPlayground}
+            onTriggerChange={setFlowProcessPlaygroundTrigger}
+            onEvaluate={handleEvaluateFlowProcessPlayground}
           />
           <ProcessCodeManagerModal
             isOpen={isProcessCodeManagerOpen}
@@ -5769,6 +6827,7 @@ export function App() {
             onDelete={handleDeleteProcessCode}
             onError={(errorValue, fallback) => showErrorToast(errorValue, fallback)}
           />
+          <AppDialogModal dialog={appDialog} onResolve={closeAppDialog} />
           <ErrorDetailsModal errorInfo={errorDetails} onClose={() => setErrorDetails(null)} />
           {toast && (
             <Toast

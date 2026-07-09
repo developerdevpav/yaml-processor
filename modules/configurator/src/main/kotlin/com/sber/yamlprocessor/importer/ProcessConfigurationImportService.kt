@@ -4,9 +4,7 @@ import com.fasterxml.jackson.annotation.JsonAlias
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.databind.DeserializationFeature
-import com.fasterxml.jackson.databind.SerializationFeature
 import com.fasterxml.jackson.dataformat.yaml.YAMLMapper
-import com.fasterxml.jackson.dataformat.yaml.YAMLGenerator
 import com.sber.yamlprocessor.model.ActionPhasesDictionary
 import com.sber.yamlprocessor.model.Audit
 import com.sber.yamlprocessor.model.B3StatusDictionary
@@ -30,6 +28,7 @@ import com.sber.yamlprocessor.model.SlaStatusDictionary
 import com.sber.yamlprocessor.model.Stage
 import com.sber.yamlprocessor.model.Subprocess
 import com.sber.yamlprocessor.model.Trigger
+import com.sber.yamlprocessor.yaml.YamlFormattingService
 import jakarta.persistence.EntityManager
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -46,19 +45,12 @@ data class ImportedProcessConfig(
 
 @Service
 class ProcessConfigurationImportService(
-    private val entityManager: EntityManager
+    private val entityManager: EntityManager,
+    private val yamlFormattingService: YamlFormattingService
 ) {
     private val yamlMapper = YAMLMapper.builder()
         .findAndAddModules()
         .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
-        .build()
-
-    private val beautifyYamlMapper = YAMLMapper.builder()
-        .findAndAddModules()
-        .disable(YAMLGenerator.Feature.WRITE_DOC_START_MARKER)
-        .enable(YAMLGenerator.Feature.MINIMIZE_QUOTES)
-        .enable(YAMLGenerator.Feature.INDENT_ARRAYS_WITH_INDICATOR)
-        .enable(SerializationFeature.INDENT_OUTPUT)
         .build()
 
     @Transactional
@@ -118,16 +110,7 @@ class ProcessConfigurationImportService(
     }
 
     fun beautifyYaml(content: String): String {
-        if (content.isBlank()) {
-            return ""
-        }
-
-        val root = runCatching { beautifyYamlMapper.readTree(content) }
-            .getOrElse { throw IllegalArgumentException("YAML невалиден: ${it.message}", it) }
-            ?: return ""
-
-        return beautifyYamlMapper.writeValueAsString(root)
-            .let { if (it.endsWith('\n')) it else "$it\n" }
+        return yamlFormattingService.format(content)
     }
 
     private fun parse(inputStream: InputStream, filename: String): ImportedProcessDefinition {

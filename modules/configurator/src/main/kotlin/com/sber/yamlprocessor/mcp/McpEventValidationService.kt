@@ -9,7 +9,6 @@ import jakarta.persistence.EntityManager
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.util.UUID
-import java.util.regex.Pattern
 
 @Service
 class McpEventValidationService(
@@ -35,7 +34,7 @@ class McpEventValidationService(
                     val configurator = stage.configurator ?: return@mapNotNull null
                     val filter = evaluateRule(configurator.filterEventRule, event)
                     val resultMatches = configurator.result.mapNotNull { result ->
-                        val scenarioMatch = scenarioMatches(scenario, result.inputScenarios)
+                        val scenarioMatch = ScenarioPatternMatcher.matches(scenario, result.inputScenarios)
                         val reverses = result.reverse.mapNotNull { reverse ->
                             val outputs = reverse.output.mapNotNull { output ->
                                 val outputRule = evaluateRule(output.rule, event)
@@ -171,27 +170,6 @@ class McpEventValidationService(
             .map { event.at(it) }
             .firstOrNull { !it.isMissingNode && !it.isNull && it.asText().isNotBlank() }
             ?.asText()
-
-    private fun scenarioMatches(scenario: String?, patterns: List<String>): Boolean {
-        if (scenario.isNullOrBlank()) {
-            return false
-        }
-        return patterns.any { pattern ->
-            val normalized = pattern.trim()
-            normalized.isNotEmpty() && Regex(globToRegex(normalized)).matches(scenario)
-        }
-    }
-
-    private fun globToRegex(pattern: String): String =
-        buildString {
-            pattern.forEach { char ->
-                when (char) {
-                    '*' -> append(".*")
-                    '?' -> append(".")
-                    else -> append(Pattern.quote(char.toString()))
-                }
-            }
-        }
 
     private fun truthy(node: JsonNode?): Boolean = when {
         node == null || node.isMissingNode || node.isNull -> false

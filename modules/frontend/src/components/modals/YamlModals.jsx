@@ -407,7 +407,7 @@ function ProcessPlaygroundTree({ result, onSelectNode }) {
   if (!result) {
     return (
       <div className="process-playground__result process-playground__result--empty">
-        <span className="process-playground__empty">Запустите проверку.</span>
+        <span className="process-playground__empty">Запустите проверку</span>
       </div>
     );
   }
@@ -479,39 +479,48 @@ function ProcessPlaygroundTree({ result, onSelectNode }) {
   );
 }
 
-function ProcessPlaygroundHistory({ items = [], onSelectItem, onClear }) {
+function ProcessPlaygroundHistory({ items = [], onSelectItem, onRemoveItem, onClear }) {
   const hasItems = items.length > 0;
 
   return (
-    <div className="process-playground-history">
-      <div className="process-playground-history__header">
-        <span className="process-playground-history__title">История Trigger</span>
-        {hasItems && (
-          <button type="button" className="process-playground-history__clear" onClick={onClear}>
-            <Trash01 aria-hidden size={12} />
-            Очистить
-          </button>
-        )}
-      </div>
+    <div className={cn('process-playground-history', !hasItems && 'process-playground-history--empty')}>
       {hasItems ? (
-        <div className="process-playground-history__list" aria-label="История Trigger">
-          {items.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className="process-playground-history__item"
-              onClick={() => onSelectItem?.(item)}
-              title="Вставить Trigger из истории"
-            >
-              <span className="process-playground-history__item-title">{item.title || 'Trigger'}</span>
-              <span className="process-playground-history__item-meta">
-                {[item.meta, item.savedAtLabel].filter(Boolean).join(' · ')}
-              </span>
+        <>
+          <div className="process-playground-history__header">
+            <button type="button" className="process-playground-history__clear" onClick={onClear}>
+              <Trash01 aria-hidden size={12} />
+              Очистить
             </button>
-          ))}
-        </div>
+          </div>
+          <div className="process-playground-history__list" aria-label="История Trigger">
+            {items.map((item) => (
+              <div key={item.id} className="process-playground-history__item">
+                <button
+                  type="button"
+                  className="process-playground-history__item-select"
+                  onClick={() => onSelectItem?.(item)}
+                  title="Вставить Trigger из истории"
+                >
+                  <span className="process-playground-history__item-title">{item.title || 'Trigger'}</span>
+                  <span className="process-playground-history__item-meta">
+                    {[item.meta, item.savedAtLabel].filter(Boolean).join(' · ')}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="process-playground-history__item-delete"
+                  onClick={() => onRemoveItem?.(item)}
+                  aria-label={`Удалить запись истории ${item.title || 'Trigger'}`}
+                  title="Удалить запись истории"
+                >
+                  <Trash01 aria-hidden size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </>
       ) : (
-        <span className="process-playground-history__empty">История пуста.</span>
+        <div className="process-playground-history__empty">История пуста.</div>
       )}
     </div>
   );
@@ -523,19 +532,31 @@ export function ProcessPlaygroundModal({
   triggerHistory,
   result,
   isSubmitting,
-  errorMessage,
   onClose,
   onTriggerChange,
   onEvaluate,
   onSelectTriggerHistoryItem,
   onClearTriggerHistory,
+  onRemoveTriggerHistoryItem,
   onSelectNode,
 }) {
   useEscapeKey(isOpen, onClose);
+  const [activeTab, setActiveTab] = useState('trigger');
+
+  useEffect(() => {
+    if (isOpen) {
+      setActiveTab('trigger');
+    }
+  }, [isOpen]);
 
   if (!isOpen) {
     return null;
   }
+
+  const handleSelectHistoryItem = (item) => {
+    onSelectTriggerHistoryItem?.(item);
+    setActiveTab('trigger');
+  };
 
   return (
     <div className="modal-shell modal-shell-playground" role="dialog" aria-modal="true" aria-labelledby="process-playground-title">
@@ -571,27 +592,115 @@ export function ProcessPlaygroundModal({
               </Button>
               <span className="process-playground__play-label">Запустить</span>
             </div>
-            {errorMessage && <p className="jsonlogic-playground__error">{errorMessage}</p>}
           </div>
 
-          <div className="process-playground__panel">
-            <div className="process-playground__panel-header">
-              <Title headingLevel="h5">Trigger</Title>
-              <ProcessPlaygroundHistory
-                items={triggerHistory}
-                onSelectItem={onSelectTriggerHistoryItem}
-                onClear={onClearTriggerHistory}
-              />
+          <div className="process-playground__panel process-playground__panel--tabs">
+            <div className="process-playground-tabs">
+              <div className="process-playground-tabs__list" role="tablist" aria-label="Playground процесса">
+                <button
+                  type="button"
+                  className={cn('process-playground-tabs__button', activeTab === 'trigger' && 'process-playground-tabs__button-active')}
+                  role="tab"
+                  id="process-playground-trigger-tab"
+                  aria-selected={activeTab === 'trigger'}
+                  aria-controls="process-playground-trigger-panel"
+                  onClick={() => setActiveTab('trigger')}
+                >
+                  Редактор
+                </button>
+                <button
+                  type="button"
+                  className={cn('process-playground-tabs__button', activeTab === 'history' && 'process-playground-tabs__button-active')}
+                  role="tab"
+                  id="process-playground-history-tab"
+                  aria-selected={activeTab === 'history'}
+                  aria-controls="process-playground-history-panel"
+                  onClick={() => setActiveTab('history')}
+                >
+                  История
+                </button>
+              </div>
+              <div
+                className="process-playground-tabs__panel"
+                role="tabpanel"
+                id={activeTab === 'trigger' ? 'process-playground-trigger-panel' : 'process-playground-history-panel'}
+                aria-labelledby={activeTab === 'trigger' ? 'process-playground-trigger-tab' : 'process-playground-history-tab'}
+              >
+                {activeTab === 'trigger' ? (
+                  <JsonSnippetEditor
+                    id="process-playground-trigger"
+                    value={triggerText}
+                    onChange={onTriggerChange}
+                    onBeautify={() => onTriggerChange(formatJsonSnippet(triggerText))}
+                    helperText="Укажите Trigger JSON."
+                    showLineNumbers
+                  />
+                ) : (
+                  <ProcessPlaygroundHistory
+                    items={triggerHistory}
+                    onSelectItem={handleSelectHistoryItem}
+                    onRemoveItem={onRemoveTriggerHistoryItem}
+                    onClear={onClearTriggerHistory}
+                  />
+                )}
+              </div>
             </div>
-            <JsonSnippetEditor
-              id="process-playground-trigger"
-              value={triggerText}
-              onChange={onTriggerChange}
-              onBeautify={() => onTriggerChange(formatJsonSnippet(triggerText))}
-              helperText="Укажите Trigger JSON."
-              showLineNumbers
-            />
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function FlowProcessPlaygroundModal({
+  isOpen,
+  triggerText,
+  isSubmitting,
+  errorMessage,
+  onClose,
+  onTriggerChange,
+  onEvaluate,
+}) {
+  useEscapeKey(isOpen, onClose);
+
+  if (!isOpen) {
+    return null;
+  }
+
+  return (
+    <div className="modal-shell modal-shell-flow-playground" role="dialog" aria-modal="true" aria-labelledby="flow-playground-title">
+      <div className="modal-shell__backdrop" onClick={onClose} />
+      <div className="modal-card modal-card-flow-playground">
+        <div className="modal-card__header">
+          <div>
+            <Title headingLevel="h4" className="modal-card__title">
+              <span id="flow-playground-title">Запуск текущего процесса</span>
+            </Title>
+          </div>
+          <button type="button" className="modal-card__close" onClick={onClose} aria-label="Закрыть запуск процесса">
+            <XClose aria-hidden size={18} />
+          </button>
+        </div>
+
+        <div className="flow-playground-trigger">
+          <JsonSnippetEditor
+            id="flow-playground-trigger"
+            value={triggerText}
+            onChange={onTriggerChange}
+            onBeautify={() => onTriggerChange(formatJsonSnippet(triggerText))}
+            helperText="Укажите Trigger JSON для текущего процесса."
+            error={errorMessage}
+            showLineNumbers
+          />
+        </div>
+
+        <div className="modal-card__footer">
+          <Button variant="secondary" onClick={onClose} isDisabled={isSubmitting}>
+            Отмена
+          </Button>
+          <Button variant="success" onClick={onEvaluate} isLoading={isSubmitting}>
+            Запустить
+          </Button>
         </div>
       </div>
     </div>

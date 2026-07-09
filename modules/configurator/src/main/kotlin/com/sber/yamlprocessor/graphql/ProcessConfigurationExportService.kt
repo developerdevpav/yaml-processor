@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode
 import com.fasterxml.jackson.databind.node.ObjectNode
 import com.fasterxml.jackson.dataformat.yaml.YAMLMapper
 import com.sber.yamlprocessor.model.Process
+import com.sber.yamlprocessor.yaml.YamlFormattingService
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import org.yaml.snakeyaml.DumperOptions
@@ -24,7 +25,8 @@ data class ProcessConfigurationExport(
 @Service
 class ProcessConfigurationExportService(
     private val crudService: JpaGraphQlCrudService,
-    private val objectMapper: ObjectMapper
+    private val objectMapper: ObjectMapper,
+    private val yamlFormattingService: YamlFormattingService
 ) {
     private val yamlMapper = YAMLMapper()
     private val yaml = Yaml(FilterEventRuleRepresenter(), DumperOptions().apply {
@@ -44,7 +46,7 @@ class ProcessConfigurationExportService(
 
         return ProcessConfigurationExport(
             filename = buildFilename(process),
-            content = yaml.dump(asYamlValue(yamlTree))
+            content = yamlFormattingService.format(yaml.dump(asYamlValue(yamlTree)))
         )
     }
 

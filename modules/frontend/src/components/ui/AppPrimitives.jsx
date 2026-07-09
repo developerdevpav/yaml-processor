@@ -1,4 +1,4 @@
-import { AlertCircle, CheckVerified02, File02, Play, Plus, XClose } from '@untitledui/icons';
+import { AlertCircle, CheckVerified02, ChevronDown, File02, Play, Plus, Server01, XClose } from '@untitledui/icons';
 import { Button as AriaButton, Menu, MenuItem, MenuTrigger, Popover } from 'react-aria-components';
 import { ProcessSelectField } from '../ProcessSelectField';
 import { cn, formatJsonSnippet } from '../../utils/ui';
@@ -141,39 +141,55 @@ export function YamlActionsMenu({
   );
 }
 
-export function TopologyPlaygroundMenu({
-  onOpenJsonLogicPlayground,
-  onOpenProcessPlayground,
-}) {
+export function DictionariesMenu({ onOpenProcessCodes }) {
   return (
     <MenuTrigger>
-      <AriaButton
-        className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700"
-        aria-label="Playground"
-      >
-        <Play aria-hidden size={16} />
-        Playground
+      <AriaButton className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-300 transition hover:bg-slate-50">
+        <Server01 aria-hidden size={16} />
+        Справочники
+        <ChevronDown aria-hidden size={16} />
       </AriaButton>
       <Popover
         offset={6}
-        className="z-[360] min-w-[180px] overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-[0_12px_32px_rgba(16,24,40,0.12)] outline-none"
+        className="z-[360] min-w-[220px] overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-[0_12px_32px_rgba(16,24,40,0.12)] outline-none"
       >
-        <Menu className="outline-none">
+        <Menu className="outline-none" aria-label="Справочники">
           <MenuItem
-            onAction={onOpenJsonLogicPlayground}
+            onAction={onOpenProcessCodes}
             className="cursor-pointer rounded-lg px-3 py-2 text-sm text-slate-700 outline-none transition hover:bg-slate-50"
           >
-            JsonLogic
-          </MenuItem>
-          <MenuItem
-            onAction={onOpenProcessPlayground}
-            className="cursor-pointer rounded-lg px-3 py-2 text-sm text-slate-700 outline-none transition hover:bg-slate-50"
-          >
-            Процесс
+            Коды процессов
           </MenuItem>
         </Menu>
       </Popover>
     </MenuTrigger>
+  );
+}
+
+export function TopologyPlaygroundButton({ onOpenJsonLogicPlayground }) {
+  return (
+    <button
+      type="button"
+      className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-300 transition hover:bg-slate-50"
+      onClick={onOpenJsonLogicPlayground}
+      aria-label="JsonLogic"
+    >
+      JsonLogic
+    </button>
+  );
+}
+
+export function TopologyProcessCheckButton({ onOpenProcessPlayground }) {
+  return (
+    <button
+      type="button"
+      className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700"
+      onClick={onOpenProcessPlayground}
+      aria-label="Проверка процесса"
+    >
+      <Play aria-hidden size={16} />
+      Проверка процесса
+    </button>
   );
 }
 
