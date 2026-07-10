@@ -5,6 +5,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.dataformat.yaml.YAMLMapper
+import com.sber.yamlprocessor.jsonlogic.JsonLogicFormattingService
 import com.sber.yamlprocessor.model.ActionPhasesDictionary
 import com.sber.yamlprocessor.model.Audit
 import com.sber.yamlprocessor.model.B3StatusDictionary
@@ -31,6 +32,7 @@ import com.sber.yamlprocessor.model.Trigger
 import com.sber.yamlprocessor.yaml.YamlFormattingService
 import jakarta.persistence.EntityManager
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.multipart.MultipartFile
 import java.io.InputStream
@@ -43,10 +45,16 @@ data class ImportedProcessConfig(
     val contextCode: String?
 )
 
+data class FailedProcessConfigImport(
+    val filename: String,
+    val error: String
+)
+
 @Service
 class ProcessConfigurationImportService(
     private val entityManager: EntityManager,
-    private val yamlFormattingService: YamlFormattingService
+    private val yamlFormattingService: YamlFormattingService,
+    private val jsonLogicFormattingService: JsonLogicFormattingService
 ) {
     private val yamlMapper = YAMLMapper.builder()
         .findAndAddModules()
@@ -57,25 +65,28 @@ class ProcessConfigurationImportService(
     fun import(files: List<MultipartFile>): List<ImportedProcessConfig> {
         require(files.isNotEmpty()) { "Не выбраны YAML-файлы для импорта." }
 
-        return files.map { file ->
-            val filename = file.originalFilename?.ifBlank { file.name } ?: file.name
-            require(!file.isEmpty) {
-                "Файл $filename пуст."
-            }
-            val processDefinition = parse(file.inputStream, filename)
-            val processConfig = ProcessConfig()
-            val process = processDefinition.toEntity(processConfig)
-            processConfig.process = process
-            entityManager.persist(processConfig)
-            entityManager.flush()
+        return files.map { file -> importFile(file) }
+    }
 
-            ImportedProcessConfig(
-                filename = filename,
-                processConfigId = processConfig.id ?: error("Imported ProcessConfig id was not generated"),
-                processId = process.id,
-                contextCode = process.contextCode?.code
-            )
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    fun importFile(file: MultipartFile): ImportedProcessConfig {
+        val filename = file.originalFilename?.ifBlank { file.name } ?: file.name
+        require(!file.isEmpty) {
+            "Файл $filename пуст."
         }
+        val processDefinition = parse(file.inputStream, filename)
+        val processConfig = ProcessConfig()
+        val process = processDefinition.toEntity(processConfig)
+        processConfig.process = process
+        entityManager.persist(processConfig)
+        entityManager.flush()
+
+        return ImportedProcessConfig(
+            filename = filename,
+            processConfigId = processConfig.id ?: error("Imported ProcessConfig id was not generated"),
+            processId = process.id,
+            contextCode = process.contextCode?.code
+        )
     }
 
     @Transactional
@@ -149,7 +160,7 @@ class ProcessConfigurationImportService(
             nodeName = nodeName.normalizedOrNull(),
             nodeComment = nodeComment.normalizedOrNull(),
             disabled = disabled,
-            trigger = Trigger(rule = trigger.rule.orEmpty())
+            trigger = Trigger(rule = jsonLogicFormattingService.format(trigger.rule))
         )
         subprocessEntity.stages = stages.map { it.toEntity(subprocessEntity) }.toMutableList()
         return subprocessEntity
@@ -177,7 +188,7 @@ class ProcessConfigurationImportService(
             interrupted = interrupted,
             multiple = multiple,
             audit = audit?.toEntity(),
-            filterEventRule = filterEventRule.orEmpty()
+            filterEventRule = jsonLogicFormattingService.format(filterEventRule)
         )
         configuratorEntity.result = result.map { it.toEntity(configuratorEntity) }.toMutableList()
         return configuratorEntity
@@ -205,7 +216,7 @@ class ProcessConfigurationImportService(
         ReverseOutput(
             phase = entityManager.getReference(ActionPhasesDictionary::class.java, phase.orEmpty()),
             name = name.normalizedOrNull(),
-            rule = rule.normalizedOrNull(),
+            rule = jsonLogicFormattingService.format(rule).normalizedOrNull(),
             body = body?.toEntity() ?: Body(),
             log = log?.toEntity() ?: EventLog(),
             parent = parent?.toEntity()

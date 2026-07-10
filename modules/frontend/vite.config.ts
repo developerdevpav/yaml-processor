@@ -8,15 +8,15 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/graphql': {
-        target: 'http://localhost:8080',
+        target: 'http://localhost:19323',
         changeOrigin: true,
       },
       '/api': {
-        target: 'http://localhost:8080',
+        target: 'http://localhost:19323',
         changeOrigin: true,
       },
       '/graphiql': {
-        target: 'http://localhost:8080',
+        target: 'http://localhost:19323',
         changeOrigin: true,
       },
     },

@@ -12,7 +12,8 @@ import org.springframework.web.multipart.MultipartFile
 import java.util.UUID
 
 data class ProcessConfigurationImportResponse(
-    val imported: List<ImportedProcessConfig>
+    val imported: List<ImportedProcessConfig>,
+    val failed: List<FailedProcessConfigImport> = emptyList()
 )
 
 @RestController
@@ -27,8 +28,25 @@ class ProcessConfigurationImportController(
     )
     fun importYaml(
         @RequestPart("files") files: List<MultipartFile>
-    ): ProcessConfigurationImportResponse =
-        ProcessConfigurationImportResponse(importService.import(files))
+    ): ProcessConfigurationImportResponse {
+        require(files.isNotEmpty()) { "Не выбраны YAML-файлы для импорта." }
+
+        val imported = mutableListOf<ImportedProcessConfig>()
+        val failed = mutableListOf<FailedProcessConfigImport>()
+
+        files.forEach { file ->
+            runCatching { importService.importFile(file) }
+                .onSuccess { imported += it }
+                .onFailure { error ->
+                    failed += FailedProcessConfigImport(
+                        filename = file.originalFilename?.ifBlank { file.name } ?: file.name,
+                        error = error.message ?: "Не удалось импортировать файл."
+                    )
+                }
+        }
+
+        return ProcessConfigurationImportResponse(imported = imported, failed = failed)
+    }
 
     @PostMapping(
         "/yaml/beautify",

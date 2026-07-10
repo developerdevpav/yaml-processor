@@ -52,4 +52,38 @@ class YamlFormattingServiceTest {
             formatted
         )
     }
+
+    @Test
+    @DisplayName("Всегда выводит JsonLogic правила literal block scalar через |-")
+    fun `formats json logic rules as literal block scalars`() {
+        val formatted = formattingService.format(
+            """
+            trigger:
+              rule: '{ "var": "events" }'
+            configurator:
+              filter-event-rule: '{ "==": [ { "var": "body.service.scenario" }, "DealStructuring" ] }'
+              result:
+                - reverse:
+                    - output:
+                        - rule: '{ "some": [ { "var": "events" }, true ] }'
+            """.trimIndent()
+        )
+
+        assertEquals(
+            """
+            trigger:
+              rule: |-
+                { "var": "events" }
+            configurator:
+              filter-event-rule: |-
+                { "==": [ { "var": "body.service.scenario" }, "DealStructuring" ] }
+              result:
+                - reverse:
+                    - output:
+                        - rule: |-
+                            { "some": [ { "var": "events" }, true ] }
+            """.trimIndent() + "\n",
+            formatted
+        )
+    }
 }

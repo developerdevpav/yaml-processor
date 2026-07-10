@@ -56,7 +56,7 @@ app:
 
 # Настройки сервера
 server:
-  port: 8080
+  port: 19323
   servlet:
     context-path: /
 

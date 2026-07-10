@@ -1,25 +1,26 @@
 import { AlertCircle, CheckVerified02, ChevronDown, File02, Play, Plus, Server01, XClose } from '@untitledui/icons';
+import type { ElementType } from 'react';
 import { Button as AriaButton, Menu, MenuItem, MenuTrigger, Popover } from 'react-aria-components';
 import { ProcessSelectField } from '../ProcessSelectField';
 import { cn, formatJsonSnippet } from '../../utils/ui';
 
-export function Page({ children }) {
+export function Page({ children }: any) {
   return <div className="min-h-screen bg-[#f8fafc] text-slate-900">{children}</div>;
 }
 
-export function PageSection({ children, className = '' }) {
+export function PageSection({ children, className = '' }: any) {
   return <section className={className}>{children}</section>;
 }
 
-export function Split({ children, className = '', hasGutter = false }) {
+export function Split({ children, className = '', hasGutter = false }: any) {
   return <div className={cn('flex', hasGutter && 'gap-6', className)}>{children}</div>;
 }
 
-export function SplitItem({ children, className = '', isFilled = false }) {
+export function SplitItem({ children, className = '', isFilled = false }: any) {
   return <div className={cn(isFilled ? 'min-w-0 flex-1' : 'shrink-0', className)}>{children}</div>;
 }
 
-export function Card({ children, className = '' }) {
+export function Card({ children, className = '' }: any) {
   return (
     <div
       className={cn(
@@ -32,19 +33,19 @@ export function Card({ children, className = '' }) {
   );
 }
 
-export function CardTitle({ children, className = '' }) {
+export function CardTitle({ children, className = '' }: any) {
   return <div className={cn('px-6 pt-6 text-lg font-semibold tracking-[-0.02em] text-slate-900', className)}>{children}</div>;
 }
 
-export function CardBody({ children, className = '' }) {
+export function CardBody({ children, className = '' }: any) {
   return <div className={cn('px-6 pb-6 pt-4', className)}>{children}</div>;
 }
 
-export function Form({ children, onSubmit }) {
+export function Form({ children, onSubmit }: any) {
   return <form onSubmit={onSubmit} className="space-y-5">{children}</form>;
 }
 
-export function FormGroup({ label, fieldId, children }) {
+export function FormGroup({ label, fieldId, children }: any) {
   return (
     <div className="space-y-1.5">
       {label && (
@@ -66,7 +67,7 @@ export function Button({
   isDisabled = false,
   isBlock = false,
   ...props
-}) {
+}: any) {
   const variantClassName = {
     primary: 'bg-[#7f56d9] text-white shadow-sm hover:bg-[#6941c6]',
     success: 'bg-emerald-600 text-white shadow-sm hover:bg-emerald-700',
@@ -100,7 +101,7 @@ export function YamlActionsMenu({
   isImporting = false,
   isExporting = false,
   canExport = false,
-}) {
+}: any) {
   return (
     <MenuTrigger>
       <AriaButton
@@ -141,7 +142,7 @@ export function YamlActionsMenu({
   );
 }
 
-export function DictionariesMenu({ onOpenProcessCodes }) {
+export function DictionariesMenu({ onOpenProcessCodes }: any) {
   return (
     <MenuTrigger>
       <AriaButton className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-300 transition hover:bg-slate-50">
@@ -166,7 +167,7 @@ export function DictionariesMenu({ onOpenProcessCodes }) {
   );
 }
 
-export function TopologyPlaygroundButton({ onOpenJsonLogicPlayground }) {
+export function TopologyPlaygroundButton({ onOpenJsonLogicPlayground }: any) {
   return (
     <button
       type="button"
@@ -179,7 +180,7 @@ export function TopologyPlaygroundButton({ onOpenJsonLogicPlayground }) {
   );
 }
 
-export function TopologyProcessCheckButton({ onOpenProcessPlayground }) {
+export function TopologyProcessCheckButton({ onOpenProcessPlayground }: any) {
   return (
     <button
       type="button"
@@ -193,7 +194,7 @@ export function TopologyProcessCheckButton({ onOpenProcessPlayground }) {
   );
 }
 
-export function Toast({ title, message, onClose, onClick, variant = 'success' }) {
+export function Toast({ title, message, onClose, onClick, variant = 'success' }: any) {
   const isError = variant === 'error';
   const isClickable = Boolean(onClick);
   const handleKeyDown = (event) => {
@@ -237,30 +238,30 @@ export function Toast({ title, message, onClose, onClick, variant = 'success' })
   );
 }
 
-export function EmptyState({ children }) {
+export function EmptyState({ children }: any) {
   return <div className="flex h-full min-h-[24rem] items-center justify-center">{children}</div>;
 }
 
-export function EmptyStateBody({ children }) {
+export function EmptyStateBody({ children }: any) {
   return <p className="mx-auto mt-2 max-w-md text-center text-sm text-slate-500">{children}</p>;
 }
 
-export function EmptyStateFooter({ children }) {
+export function EmptyStateFooter({ children }: any) {
   return <div className="mt-6">{children}</div>;
 }
 
-export function Spinner({ size = 'xl' }) {
+export function Spinner({ size = 'xl' }: any) {
   const dimensions = size === 'xl' ? 'h-10 w-10' : 'h-6 w-6';
   return <div className={cn('animate-spin rounded-full border-4 border-slate-200 border-t-[#7f56d9]', dimensions)} />;
 }
 
-export function Text({ children, component = 'p', className = '' }) {
-  const Component = component;
+export function Text({ children, component = 'p', className = '' }: any) {
+  const Component = component as ElementType;
   const baseClassName = component === 'small' ? 'text-sm text-slate-500' : 'text-base text-slate-600';
   return <Component className={cn(baseClassName, className)}>{children}</Component>;
 }
 
-export function StaticField({ label, value, className = '' }) {
+export function StaticField({ label, value, className = '' }: any) {
   return (
     <div className={cn('static-field', className)}>
       <div className="static-field__label">{label}</div>
@@ -269,17 +270,17 @@ export function StaticField({ label, value, className = '' }) {
   );
 }
 
-export function StaticJsonField({ label, value, className = '' }) {
+export function StaticJsonField({ label, value, className = '', formatter = formatJsonSnippet }: any) {
   return (
     <div className={cn('static-field', className)}>
       <div className="static-field__label">{label}</div>
-      <pre className="static-field__code">{formatJsonSnippet(value ?? '')}</pre>
+      <pre className="static-field__code">{formatter(value ?? '')}</pre>
     </div>
   );
 }
 
-export function Title({ children, headingLevel = 'h2', className = '', ...props }) {
-  const Component = headingLevel;
+export function Title({ children, headingLevel = 'h2', className = '', ...props }: any) {
+  const Component = headingLevel as ElementType;
   const levelClassName = {
     h1: 'text-5xl font-semibold tracking-[-0.04em] text-slate-900',
     h3: 'text-2xl font-semibold tracking-[-0.03em] text-slate-900',
@@ -291,7 +292,7 @@ export function Title({ children, headingLevel = 'h2', className = '', ...props 
   return <Component className={cn(levelClassName, className)} {...props}>{children}</Component>;
 }
 
-export function TextInput({ onChange, className = '', ...props }) {
+export function TextInput({ onChange, className = '', ...props }: any) {
   return (
     <input
       className={cn(
@@ -304,7 +305,7 @@ export function TextInput({ onChange, className = '', ...props }) {
   );
 }
 
-export function TextArea({ onChange, className = '', ...props }) {
+export function TextArea({ onChange, className = '', ...props }: any) {
   return (
     <textarea
       className={cn(
@@ -317,7 +318,7 @@ export function TextArea({ onChange, className = '', ...props }) {
   );
 }
 
-export function Checkbox({ id, isChecked, onChange, label }) {
+export function Checkbox({ id, isChecked, onChange, label }: any) {
   return (
     <label htmlFor={id} className="inline-flex items-center gap-3 text-sm font-medium text-slate-700">
       <input
@@ -332,7 +333,7 @@ export function Checkbox({ id, isChecked, onChange, label }) {
   );
 }
 
-export function FileTriggerButton({ onClick }) {
+export function FileTriggerButton({ onClick }: any) {
   return (
     <Button variant="secondary" onClick={onClick}>
       <Plus aria-hidden size={20} />

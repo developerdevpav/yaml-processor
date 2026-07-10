@@ -2,7 +2,6 @@ package com.sber.yamlprocessor.importer
 
 import org.junit.jupiter.api.Test
 import org.mockito.BDDMockito.given
-import org.mockito.ArgumentMatchers.anyList
 import org.mockito.ArgumentMatchers
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
@@ -33,14 +32,12 @@ class ProcessConfigurationImportControllerTest {
         val processId = UUID.fromString("22222222-2222-2222-2222-222222222222")
         val file = MockMultipartFile("files", "process.yaml", "application/yaml", "process: {}\n".toByteArray())
 
-        given(importService.import(anyList())).willReturn(
-            listOf(
-                ImportedProcessConfig(
-                    filename = "process.yaml",
-                    processConfigId = processConfigId,
-                    processId = processId,
-                    contextCode = "PSPLUS"
-                )
+        given(importService.importFile(eq(file))).willReturn(
+            ImportedProcessConfig(
+                filename = "process.yaml",
+                processConfigId = processConfigId,
+                processId = processId,
+                contextCode = "PSPLUS"
             )
         )
 
@@ -54,6 +51,7 @@ class ProcessConfigurationImportControllerTest {
             jsonPath("$.imported[0].process_config_id") { value(processConfigId.toString()) }
             jsonPath("$.imported[0].process_id") { value(processId.toString()) }
             jsonPath("$.imported[0].context_code") { value("PSPLUS") }
+            jsonPath("$.failed.length()") { value(0) }
         }
     }
 
@@ -82,6 +80,36 @@ class ProcessConfigurationImportControllerTest {
             jsonPath("$.process_config_id") { value(processConfigId.toString()) }
             jsonPath("$.process_id") { value(processId.toString()) }
             jsonPath("$.context_code") { value("PSPLUS") }
+        }
+    }
+
+    @Test
+    fun `returns failed yaml file without failing whole import`() {
+        val processConfigId = UUID.fromString("11111111-1111-1111-1111-111111111111")
+        val processId = UUID.fromString("22222222-2222-2222-2222-222222222222")
+        val validFile = MockMultipartFile("files", "valid.yaml", "application/yaml", "process: {}\n".toByteArray())
+        val invalidFile = MockMultipartFile("files", "invalid.yaml", "application/yaml", "process: [\n".toByteArray())
+
+        given(importService.importFile(validFile)).willReturn(
+            ImportedProcessConfig(
+                filename = "valid.yaml",
+                processConfigId = processConfigId,
+                processId = processId,
+                contextCode = "PSPLUS"
+            )
+        )
+        given(importService.importFile(invalidFile)).willThrow(IllegalArgumentException("YAML сломан"))
+
+        mockMvc.multipart("/api/process-configs/import") {
+            file(validFile)
+            file(invalidFile)
+            contentType = MediaType.MULTIPART_FORM_DATA
+        }.andExpect {
+            status { isOk() }
+            content { contentType(MediaType.APPLICATION_JSON) }
+            jsonPath("$.imported[0].filename") { value("valid.yaml") }
+            jsonPath("$.failed[0].filename") { value("invalid.yaml") }
+            jsonPath("$.failed[0].error") { value("YAML сломан") }
         }
     }
 

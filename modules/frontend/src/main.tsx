@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { ApolloClient, ApolloProvider, HttpLink, InMemoryCache } from '@apollo/client';
 import 'reactflow/dist/style.css';
 import './app.css';
-import { App } from './App';
+import { App } from './app/App';
 
 const client = new ApolloClient({
   link: new HttpLink({

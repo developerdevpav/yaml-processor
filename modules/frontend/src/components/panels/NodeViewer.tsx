@@ -1,4 +1,9 @@
 import { Card, CardBody, StaticField, StaticJsonField, Title } from '../ui/AppPrimitives';
+import { formatCompactJsonLogicSnippet } from '../../utils/ui';
+
+function StaticJsonLogicField({ label, value }: any) {
+  return <StaticJsonField label={label} value={value} formatter={formatCompactJsonLogicSnippet} />;
+}
 
 export function NodeViewer({ processConfig, selectedNodeId, findSelectedNode, formatReverseOutputEventType }) {
   const selected = findSelectedNode(processConfig, selectedNodeId);
@@ -24,7 +29,7 @@ export function NodeViewer({ processConfig, selectedNodeId, findSelectedNode, fo
           <>
             <StaticField label="Название подпроцесса" value={node.nodeName || '—'} />
             <StaticField label="Описание подпроцесса" value={node.nodeComment || '—'} />
-            <StaticJsonField label="JsonLogic правило запуска" value={node.trigger?.rule ?? ''} />
+            <StaticJsonLogicField label="JsonLogic правило запуска" value={node.trigger?.rule ?? ''} />
           </>
         )}
 
@@ -34,7 +39,7 @@ export function NodeViewer({ processConfig, selectedNodeId, findSelectedNode, fo
             <StaticField label="Context code" value={node.contextCode?.code || '—'} />
             <StaticField label="Название" value={node.nodeName || '—'} />
             <StaticField label="Описание" value={node.nodeComment || '—'} />
-            <StaticJsonField label="Правило JsonLogic" value={node.configurator?.filterEventRule ?? ''} />
+            <StaticJsonLogicField label="Правило JsonLogic" value={node.configurator?.filterEventRule ?? ''} />
             <div className="viewer-section">
               <Title headingLevel="h5">Настройка состояния стадии</Title>
               <StaticField label="Выключить" value={node.configurator?.disabled ? 'Да' : 'Нет'} />
@@ -73,7 +78,7 @@ export function NodeViewer({ processConfig, selectedNodeId, findSelectedNode, fo
           <>
             <StaticField label="Тип события" value={node.phase?.code || '—'} />
             <StaticField label="Идентификационное имя" value={node.name || '—'} />
-            <StaticJsonField label="Правило JsonLogic" value={node.rule ?? ''} />
+            <StaticJsonLogicField label="Правило JsonLogic" value={node.rule ?? ''} />
             <div className="viewer-section">
               <Title headingLevel="h5">B3Event Body</Title>
               <StaticField label="B3Event.body.type" value={node.body?.type || '—'} />

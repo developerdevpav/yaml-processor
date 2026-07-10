@@ -23,10 +23,10 @@ import {
   JsonLogicPlaygroundModal,
   JsonSnippetEditor,
   ProcessPlaygroundModal,
-} from './components/modals/YamlModals';
-import { NodeViewer } from './components/panels/NodeViewer';
-import { ProcessTopology } from './components/topology/ProcessTopology';
-import { ProcessSelectField } from './components/ProcessSelectField';
+} from '../../components/modals/YamlModals';
+import { NodeViewer } from '../../components/panels/NodeViewer';
+import { ProcessTopology } from '../../components/topology/ProcessTopology';
+import { ProcessSelectField } from '../../components/ProcessSelectField';
 import {
   Button,
   Card,
@@ -45,8 +45,50 @@ import {
   Title,
   Toast,
   YamlActionsMenu,
-} from './components/ui/AppPrimitives';
-import { cn, formatJsonSnippet, stringifyJsonForEditor } from './utils/ui';
+} from '../../components/ui/AppPrimitives';
+import {
+  cn,
+  formatCompactJsonLogicSnippet,
+  formatJsonSnippet,
+  stringifyCompactJsonLogicForEditor,
+  stringifyJsonForEditor,
+} from '../../utils/ui';
+import {
+  CREATE_CONTEXT_CODE,
+  CREATE_PROCESS,
+  CREATE_RESULT_NODE,
+  CREATE_REVERSE_NODE,
+  CREATE_REVERSE_OUTPUT_NODE,
+  CREATE_STAGE_NODE,
+  CREATE_SUBPROCESS_NODE,
+  DELETE_CONFIGURATOR_NODE,
+  DELETE_CONTEXT_CODE,
+  DELETE_PROCESS_CONFIG,
+  DELETE_RESULT_NODE,
+  DELETE_REVERSE_NODE,
+  DELETE_REVERSE_OUTPUT_NODE,
+  DELETE_STAGE_NODE,
+  DELETE_SUBPROCESS_NODE,
+  PROCESS_FIELDS,
+  RENAME_CONTEXT_CODE,
+  REORDER_REVERSE_OUTPUTS,
+  REORDER_SUBPROCESS_STAGES,
+  UPDATE_CONFIGURATOR_NODE,
+  UPDATE_PROCESS,
+  UPDATE_PROCESS_NODE,
+  UPDATE_RESULT_NODE,
+  UPDATE_REVERSE_NODE,
+  UPDATE_REVERSE_OUTPUT_NODE,
+  UPDATE_STAGE_NODE,
+  UPDATE_SUBPROCESS_NODE,
+} from './api/graphqlDocuments';
+import { ErrorDetailsModal, AppDialogModal } from './components/AppDialogs';
+import { ProcessCodeManagerModal } from './components/ProcessCodeManagerModal';
+import { NodeOrderEditor } from './components/NodeOrderEditor';
+import { NodeEditor } from './components/node-editor/NodeEditor';
+import { ProcessTreeSidebar } from './components/ProcessTreeSidebar';
+import { buildProcessCodeUsage, formatProcessCodeUsage, normalizeProcessCode, validateProcessCode } from './model/processCodes';
+import { createProcessTreeFolderId, getProcessConfigDisplayName, normalizeProcessTreeFolderName, normalizeProcessTreeState, readProcessTreeState, ROOT_PROCESS_TREE_FOLDER_ID, writeProcessTreeState } from './model/processTreeState';
 
 function getFilenameFromContentDisposition(headerValue) {
   if (!headerValue) {
@@ -86,79 +128,20 @@ function getImportFileKey(file) {
   return `${getImportFilePath(file)}:${file?.size ?? 0}:${file?.lastModified ?? 0}`;
 }
 
+function readRestField(source, camelCaseName, snakeCaseName) {
+  return source?.[camelCaseName] ?? source?.[snakeCaseName] ?? null;
+}
+
+function getImportedProcessConfigId(importResult) {
+  return readRestField(importResult, 'processConfigId', 'process_config_id');
+}
+
+function getImportedProcessId(importResult) {
+  return readRestField(importResult, 'processId', 'process_id');
+}
+
 function formatAutosaveCountdownLabel(secondsLeft) {
   return `${Math.max(1, Math.ceil(secondsLeft))} c`;
-}
-
-const CONTEXT_CODE_MAX_LENGTH = 64;
-
-function normalizeProcessCode(value) {
-  return String(value ?? '').trim();
-}
-
-function validateProcessCode(value) {
-  const code = normalizeProcessCode(value);
-  if (!code) {
-    return 'Код процесса не должен быть пустым.';
-  }
-
-  if (code.length > CONTEXT_CODE_MAX_LENGTH) {
-    return `Код процесса должен быть не длиннее ${CONTEXT_CODE_MAX_LENGTH} символов.`;
-  }
-
-  return '';
-}
-
-function incrementProcessCodeUsage(usageMap, rawCode, usageKey) {
-  const code = normalizeProcessCode(rawCode);
-  if (!code) {
-    return;
-  }
-
-  const current = usageMap.get(code) ?? {
-    processCount: 0,
-    stageCount: 0,
-    totalCount: 0,
-  };
-
-  usageMap.set(code, {
-    ...current,
-    [usageKey]: current[usageKey] + 1,
-    totalCount: current.totalCount + 1,
-  });
-}
-
-function buildProcessCodeUsage(processConfigs) {
-  const usageMap = new Map();
-
-  processConfigs.forEach((config) => {
-    const process = config?.process;
-    incrementProcessCodeUsage(usageMap, process?.contextCode?.code, 'processCount');
-
-    (process?.subprocess ?? []).forEach((subprocess) => {
-      (subprocess?.stages ?? []).forEach((stage) => {
-        incrementProcessCodeUsage(usageMap, stage?.contextCode?.code, 'stageCount');
-      });
-    });
-  });
-
-  return usageMap;
-}
-
-function formatProcessCodeUsage(usage) {
-  if (!usage?.totalCount) {
-    return 'Не используется';
-  }
-
-  const parts = [];
-  if (usage.processCount > 0) {
-    parts.push(`процессов: ${usage.processCount}`);
-  }
-  if (usage.stageCount > 0) {
-    parts.push(`стадий: ${usage.stageCount}`);
-  }
-
-  return `Используется, ${parts.join(', ')}`;
 }
 
 function getYamlEditorSourceKey(processConfig) {
@@ -185,374 +168,6 @@ function isEmptyJsonValue(value) {
   return false;
 }
 
-const PROCESS_FIELDS = gql`
-  fragment ReverseOutputFields on ReverseOutput {
-    id
-    name
-    rule
-    phase {
-      code
-    }
-    body {
-      type
-      eventObject {
-        type
-      }
-      service {
-        scenario
-        type
-        status {
-          code
-        }
-        sla {
-          durationValue
-          durationUnit {
-            code
-          }
-          status {
-            code
-          }
-        }
-      }
-    }
-    log {
-      journalServiceName
-      message
-    }
-    parent {
-      include
-      mode
-    }
-  }
-
-  fragment ReverseFields on Reverse {
-    id
-    status {
-      code
-    }
-    output {
-      ...ReverseOutputFields
-    }
-  }
-
-  fragment ResultFields on Result {
-    id
-    inputScenarios
-    reverse {
-      ...ReverseFields
-    }
-  }
-
-  fragment ConfiguratorFields on Configurator {
-    id
-    disabled
-    interrupted
-    multiple
-    filterEventRule
-    audit {
-      enabled
-      eventCode
-      eventDescription
-    }
-    result {
-      ...ResultFields
-    }
-  }
-
-  fragment StageFields on Stage {
-    id
-    nodeName
-    nodeComment
-    executor
-    contextCode {
-      code
-    }
-    log {
-      journalServiceName
-    }
-    configurator {
-      ...ConfiguratorFields
-    }
-  }
-
-  fragment SubprocessFields on Subprocess {
-    id
-    nodeName
-    nodeComment
-    disabled
-    trigger {
-      rule
-    }
-    stages {
-      ...StageFields
-    }
-  }
-
-  query ProcessConfigList {
-    actionPhasesDictionaryList {
-      code
-    }
-    b3StatusDictionaryList {
-      code
-    }
-    slaDurationUnitDictionaryList {
-      code
-    }
-    slaStatusDictionaryList {
-      code
-    }
-    contextCodesDictionaryList {
-      code
-    }
-    processConfigList {
-      id
-      createdAt
-      updatedAt
-      process {
-        id
-        nodeName
-        nodeComment
-        disabled
-        contextCode {
-          code
-        }
-        subprocess {
-          ...SubprocessFields
-        }
-      }
-    }
-  }
-`;
-
-const CREATE_PROCESS = gql`
-  mutation CreateProcessConfig($input: ProcessConfigInput!) {
-    createProcessConfig(input: $input) {
-      id
-      process {
-        id
-        nodeName
-        nodeComment
-        disabled
-        contextCode {
-          code
-        }
-        subprocess {
-          id
-          nodeName
-          nodeComment
-          disabled
-          trigger {
-            rule
-          }
-          stages {
-            id
-          }
-        }
-      }
-    }
-  }
-`;
-
-const UPDATE_PROCESS = gql`
-  mutation UpdateProcessConfig($id: ID!, $input: ProcessConfigInput!) {
-    updateProcessConfig(id: $id, input: $input) {
-      id
-    }
-  }
-`;
-
-const DELETE_PROCESS_CONFIG = gql`
-  mutation DeleteProcessConfig($id: ID!) {
-    deleteProcessConfig(id: $id)
-  }
-`;
-
-const CREATE_CONTEXT_CODE = gql`
-  mutation CreateContextCode($code: ID!) {
-    createContextCodesDictionary(input: { code: $code }) {
-      code
-    }
-  }
-`;
-
-const RENAME_CONTEXT_CODE = gql`
-  mutation RenameContextCode($id: ID!, $code: String!) {
-    renameContextCodesDictionary(id: $id, code: $code) {
-      code
-    }
-  }
-`;
-
-const DELETE_CONTEXT_CODE = gql`
-  mutation DeleteContextCode($id: ID!) {
-    deleteContextCodesDictionary(id: $id)
-  }
-`;
-
-const UPDATE_STAGE_NODE = gql`
-  mutation UpdateStageNode($id: ID!, $input: StageInput!) {
-    updateStageNode(id: $id, input: $input) {
-      id
-    }
-  }
-`;
-
-const UPDATE_CONFIGURATOR_NODE = gql`
-  mutation UpdateConfiguratorNode($id: ID!, $input: ConfiguratorInput!) {
-    updateConfiguratorNode(id: $id, input: $input) {
-      id
-    }
-  }
-`;
-
-const UPDATE_SUBPROCESS_NODE = gql`
-  mutation UpdateSubprocessNode($id: ID!, $input: SubprocessInput!) {
-    updateSubprocessNode(id: $id, input: $input) {
-      id
-    }
-  }
-`;
-
-const REORDER_SUBPROCESS_STAGES = gql`
-  mutation ReorderSubprocessStages($subprocessId: ID!, $stageIds: [ID!]!) {
-    reorderSubprocessStages(subprocessId: $subprocessId, stageIds: $stageIds) {
-      id
-    }
-  }
-`;
-
-const REORDER_REVERSE_OUTPUTS = gql`
-  mutation ReorderReverseOutputs($reverseId: ID!, $outputIds: [ID!]!) {
-    reorderReverseOutputs(reverseId: $reverseId, outputIds: $outputIds) {
-      id
-    }
-  }
-`;
-
-const UPDATE_PROCESS_NODE = gql`
-  mutation UpdateProcessNode($id: ID!, $input: ProcessInput!) {
-    updateProcessNode(id: $id, input: $input) {
-      id
-      nodeName
-      nodeComment
-      contextCode {
-        code
-      }
-    }
-  }
-`;
-
-const CREATE_SUBPROCESS_NODE = gql`
-  mutation CreateSubprocessNode($processId: ID!, $input: SubprocessInput!) {
-    createSubprocessNode(processId: $processId, input: $input) {
-      id
-    }
-  }
-`;
-
-const CREATE_RESULT_NODE = gql`
-  mutation CreateResultNode($configuratorId: ID!, $input: ResultInput!) {
-    createResultNode(configuratorId: $configuratorId, input: $input) {
-      id
-      inputScenarios
-      reverse {
-        id
-        status {
-          code
-        }
-      }
-    }
-  }
-`;
-
-const CREATE_REVERSE_NODE = gql`
-  mutation CreateReverseNode($resultId: ID!, $input: ReverseInput!) {
-    createReverseNode(resultId: $resultId, input: $input) {
-      id
-      status {
-        code
-      }
-    }
-  }
-`;
-
-const UPDATE_REVERSE_NODE = gql`
-  mutation UpdateReverseNode($id: ID!, $input: ReverseInput!) {
-    updateReverseNode(id: $id, input: $input) {
-      id
-    }
-  }
-`;
-
-const UPDATE_RESULT_NODE = gql`
-  mutation UpdateResultNode($id: ID!, $input: ResultInput!) {
-    updateResultNode(id: $id, input: $input) {
-      id
-    }
-  }
-`;
-
-const CREATE_REVERSE_OUTPUT_NODE = gql`
-  mutation CreateReverseOutputNode($reverseId: ID!, $input: ReverseOutputInput!) {
-    createReverseOutputNode(reverseId: $reverseId, input: $input) {
-      id
-      name
-      rule
-    }
-  }
-`;
-
-const UPDATE_REVERSE_OUTPUT_NODE = gql`
-  mutation UpdateReverseOutputNode($id: ID!, $input: ReverseOutputInput!) {
-    updateReverseOutputNode(id: $id, input: $input) {
-      id
-    }
-  }
-`;
-
-const DELETE_SUBPROCESS_NODE = gql`
-  mutation DeleteSubprocessNode($id: ID!) {
-    deleteSubprocessNode(id: $id)
-  }
-`;
-
-const CREATE_STAGE_NODE = gql`
-  mutation CreateStageNode($subprocessId: ID!, $input: StageInput!) {
-    createStageNode(subprocessId: $subprocessId, input: $input) {
-      id
-    }
-  }
-`;
-
-const DELETE_STAGE_NODE = gql`
-  mutation DeleteStageNode($id: ID!) {
-    deleteStageNode(id: $id)
-  }
-`;
-
-const DELETE_CONFIGURATOR_NODE = gql`
-  mutation DeleteConfiguratorNode($id: ID!) {
-    deleteConfiguratorNode(id: $id)
-  }
-`;
-
-const DELETE_RESULT_NODE = gql`
-  mutation DeleteResultNode($id: ID!) {
-    deleteResultNode(id: $id)
-  }
-`;
-
-const DELETE_REVERSE_NODE = gql`
-  mutation DeleteReverseNode($id: ID!) {
-    deleteReverseNode(id: $id)
-  }
-`;
-
-const DELETE_REVERSE_OUTPUT_NODE = gql`
-  mutation DeleteReverseOutputNode($id: ID!) {
-    deleteReverseOutputNode(id: $id)
-  }
-`;
 
 function getErrorMessage(error, fallback) {
   if (!error) {
@@ -669,7 +284,7 @@ function getErrorDetails(error, fallback) {
   return sections.filter(Boolean).join('\n\n');
 }
 
-function createErrorInfo(error, fallback = 'Произошла ошибка.', options = {}) {
+function createErrorInfo(error, fallback = 'Произошла ошибка.', options: any = {}) {
   const message = getErrorMessage(error, fallback) || fallback;
 
   return {
@@ -679,165 +294,6 @@ function createErrorInfo(error, fallback = 'Произошла ошибка.', o
     details: getErrorDetails(error, fallback),
     occurredAt: new Date().toISOString(),
   };
-}
-
-function ErrorDetailsModal({ errorInfo, onClose }) {
-  useEffect(() => {
-    if (!errorInfo) {
-      return undefined;
-    }
-
-    const handleKeyDown = (event) => {
-      if (event.key === 'Escape') {
-        onClose();
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [errorInfo, onClose]);
-
-  if (!errorInfo) {
-    return null;
-  }
-
-  return (
-    <div className="modal-shell error-details-modal" role="dialog" aria-modal="true" aria-labelledby="error-details-title">
-      <div className="modal-shell__backdrop" onClick={onClose} />
-      <div className="modal-card error-details-modal__card">
-        <div className="modal-card__header">
-          <div>
-            <Title headingLevel="h4" className="modal-card__title">
-              <span id="error-details-title">Информация об ошибке</span>
-            </Title>
-            <Text className="modal-card__subtitle">{errorInfo.message}</Text>
-          </div>
-          <button type="button" className="modal-card__close" onClick={onClose} aria-label="Закрыть информацию об ошибке">
-            <XClose aria-hidden size={18} />
-          </button>
-        </div>
-
-        <div className="error-details-modal__meta">
-          <span>Время: {new Date(errorInfo.occurredAt).toLocaleString('ru-RU')}</span>
-        </div>
-        <pre className="error-details-modal__details">{errorInfo.details}</pre>
-      </div>
-    </div>
-  );
-}
-
-function AppDialogModal({ dialog, onResolve }) {
-  const [inputValue, setInputValue] = useState('');
-  const inputRef = useRef(null);
-
-  useEffect(() => {
-    if (!dialog) {
-      return;
-    }
-
-    setInputValue(dialog.defaultValue ?? '');
-    const focusTimeoutId = window.setTimeout(() => {
-      inputRef.current?.focus();
-      inputRef.current?.select?.();
-    }, 0);
-
-    return () => window.clearTimeout(focusTimeoutId);
-  }, [dialog]);
-
-  useEffect(() => {
-    if (!dialog) {
-      return undefined;
-    }
-
-    const handleKeyDown = (event) => {
-      if (event.key === 'Escape') {
-        onResolve(dialog.type === 'prompt' ? null : false);
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [dialog, onResolve]);
-
-  if (!dialog) {
-    return null;
-  }
-
-  const isPrompt = dialog.type === 'prompt';
-  const isAlert = dialog.type === 'alert';
-  const titleId = `${dialog.id}-title`;
-  const descriptionId = `${dialog.id}-description`;
-  const cancelValue = isAlert ? true : isPrompt ? null : false;
-  const confirmText = dialog.confirmText ?? (isAlert ? 'Ок' : 'Подтвердить');
-  const cancelText = dialog.cancelText ?? 'Отмена';
-
-  const handleSubmit = (event) => {
-    event.preventDefault();
-    onResolve(isPrompt ? inputValue : true);
-  };
-
-  return (
-    <div
-      className="modal-shell app-dialog-modal"
-      role={dialog.variant === 'danger' ? 'alertdialog' : 'dialog'}
-      aria-modal="true"
-      aria-labelledby={titleId}
-      aria-describedby={descriptionId}
-    >
-      <div className="modal-shell__backdrop" onClick={() => onResolve(cancelValue)} />
-      <form className="modal-card app-dialog-modal__card" onSubmit={handleSubmit}>
-        <div className="modal-card__header">
-          <div>
-            <Title headingLevel="h4" className="modal-card__title" id={titleId}>
-              {dialog.title}
-            </Title>
-            {dialog.message && (
-              <p className="modal-card__subtitle app-dialog-modal__message" id={descriptionId}>
-                {dialog.message}
-              </p>
-            )}
-          </div>
-          <button
-            type="button"
-            className="modal-card__close"
-            onClick={() => onResolve(cancelValue)}
-            aria-label="Закрыть"
-          >
-            <XClose aria-hidden size={18} />
-          </button>
-        </div>
-
-        {isPrompt && (
-          <div className="app-dialog-modal__body">
-            <FormGroup label={dialog.inputLabel ?? dialog.title} fieldId={`${dialog.id}-input`}>
-              <input
-                ref={inputRef}
-                id={`${dialog.id}-input`}
-                className="app-dialog-modal__input"
-                value={inputValue}
-                onChange={(event) => setInputValue(event.target.value)}
-                placeholder={dialog.placeholder ?? ''}
-              />
-            </FormGroup>
-          </div>
-        )}
-
-        <div className="modal-card__footer">
-          {!isAlert && (
-            <Button type="button" variant="secondary" onClick={() => onResolve(cancelValue)}>
-              {cancelText}
-            </Button>
-          )}
-          <Button
-            type="submit"
-            className={dialog.variant === 'danger' ? 'app-dialog-modal__danger-button' : ''}
-          >
-            {confirmText}
-          </Button>
-        </div>
-      </form>
-    </div>
-  );
 }
 
 function reorderItems(items, fromIndex, toIndex) {
@@ -887,109 +343,6 @@ const DEFAULT_PROCESS_PLAYGROUND_TRIGGER = JSON.stringify(
 const PROCESS_PLAYGROUND_TRIGGER_HISTORY_KEY = 'yamlProcessor.processPlaygroundTriggerHistory.v1';
 const PROCESS_PLAYGROUND_TRIGGER_HISTORY_LIMIT = 12;
 const FLOW_PLAYBACK_STEP_DELAY_MS = 520;
-const PROCESS_TREE_STORAGE_KEY = 'yamlProcessor.processTree.v1';
-const ROOT_PROCESS_TREE_FOLDER_ID = 'root';
-const PROCESS_TREE_DRAG_TYPE = 'application/x-yaml-processor-process-config';
-
-function createProcessTreeFolderId() {
-  if (typeof window !== 'undefined' && window.crypto?.randomUUID) {
-    return `folder:${window.crypto.randomUUID()}`;
-  }
-
-  return `folder:${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-
-function normalizeProcessTreeFolderName(value) {
-  return String(value ?? '').trim();
-}
-
-function normalizeProcessTreeState(rawState, processConfigs = []) {
-  const source = rawState && typeof rawState === 'object' ? rawState : {};
-  const foldersSource = Array.isArray(source.folders) ? source.folders : [];
-  const knownProcessIds = new Set((processConfigs ?? []).map((item) => String(item.id)).filter(Boolean));
-  const processIdsAreKnown = knownProcessIds.size > 0;
-  const folderIds = new Set([ROOT_PROCESS_TREE_FOLDER_ID]);
-  const folders = [];
-
-  foldersSource.forEach((folder) => {
-    const folderId = typeof folder?.id === 'string' ? folder.id : '';
-    if (!folderId || folderId === ROOT_PROCESS_TREE_FOLDER_ID || folderIds.has(folderId)) {
-      return;
-    }
-
-    folderIds.add(folderId);
-    folders.push({
-      id: folderId,
-      name: normalizeProcessTreeFolderName(folder.name) || 'Новая папка',
-      parentId: typeof folder.parentId === 'string' ? folder.parentId : ROOT_PROCESS_TREE_FOLDER_ID,
-    });
-  });
-
-  const normalizedFolders = folders.map((folder) => ({
-    ...folder,
-    parentId:
-      folder.parentId !== folder.id && folderIds.has(folder.parentId)
-        ? folder.parentId
-        : ROOT_PROCESS_TREE_FOLDER_ID,
-  }));
-  const normalizedFolderIds = new Set([
-    ROOT_PROCESS_TREE_FOLDER_ID,
-    ...normalizedFolders.map((folder) => folder.id),
-  ]);
-  const processFolders = {};
-
-  Object.entries(source.processFolders ?? {}).forEach(([processId, folderId]) => {
-    const normalizedProcessId = String(processId);
-    const normalizedFolderId = String(folderId);
-    if (processIdsAreKnown && !knownProcessIds.has(normalizedProcessId)) {
-      return;
-    }
-    if (!normalizedFolderIds.has(normalizedFolderId) || normalizedFolderId === ROOT_PROCESS_TREE_FOLDER_ID) {
-      return;
-    }
-
-    processFolders[normalizedProcessId] = normalizedFolderId;
-  });
-
-  return {
-    folders: normalizedFolders,
-    processFolders,
-  };
-}
-
-function readProcessTreeState() {
-  if (typeof window === 'undefined') {
-    return normalizeProcessTreeState(null);
-  }
-
-  try {
-    const rawValue = window.localStorage.getItem(PROCESS_TREE_STORAGE_KEY);
-    return normalizeProcessTreeState(rawValue ? JSON.parse(rawValue) : null);
-  } catch {
-    return normalizeProcessTreeState(null);
-  }
-}
-
-function writeProcessTreeState(state) {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  try {
-    window.localStorage.setItem(PROCESS_TREE_STORAGE_KEY, JSON.stringify(normalizeProcessTreeState(state)));
-  } catch {
-    // Tree organization is a local convenience; failure to persist should not block process editing.
-  }
-}
-
-function getProcessConfigDisplayName(processConfig) {
-  return (
-    processConfig?.process?.nodeName?.trim() ||
-    processConfig?.process?.contextCode?.code?.trim() ||
-    'Process'
-  );
-}
-
 function getEventService(event) {
   return (
     event?.body?.eventObject?.service ??
@@ -1178,7 +531,7 @@ function parseRegexpPattern(pattern) {
 }
 
 function globPatternToRegExp(pattern) {
-  const expression = Array.from(pattern)
+  const expression = Array.from(String(pattern))
     .map((character) => {
       if (character === '*') {
         return '.*';
@@ -1485,6 +838,8 @@ async function buildProcessPlaygroundResult(processConfigs, trigger) {
   return result;
 }
 
+// The playground mirrors backend matching rules on the client so an analyst can inspect
+// which process nodes would handle a trigger before saving or exporting YAML.
 function collectProcessPlaygroundExecutedNodeIds(result, processConfigId = null) {
   const nodeIds = new Set();
   const shouldIncludeProcess = (process) =>
@@ -1835,6 +1190,7 @@ function serializeSubprocess(subprocess) {
 }
 
 function serializeProcessConfig(processConfig) {
+  // GraphQL mutations expect clean input objects without Apollo metadata or display-only fields.
   return {
     process: processConfig.process
       ? {
@@ -2524,7 +1880,7 @@ function getNodeSavePayload(kind, draft, subprocessTriggerText = '', filterEvent
       disabled: draft.disabled ?? false,
       trigger: {
         ...(draft.trigger ?? {}),
-        rule: JSON.stringify(rawTrigger ? JSON.parse(rawTrigger) : {}, null, 2),
+        rule: stringifyCompactJsonLogicForEditor(rawTrigger ? JSON.parse(rawTrigger) : {}),
       },
     };
   }
@@ -2539,7 +1895,7 @@ function getNodeSavePayload(kind, draft, subprocessTriggerText = '', filterEvent
       log: draft.log ?? { journalServiceName: '' },
       configurator: serializeStageConfigurator(
         draft.configurator,
-        JSON.stringify(rawFilterEventRule ? JSON.parse(rawFilterEventRule) : {}, null, 2),
+        stringifyCompactJsonLogicForEditor(rawFilterEventRule ? JSON.parse(rawFilterEventRule) : {}),
       ),
     };
   }
@@ -2549,7 +1905,7 @@ function getNodeSavePayload(kind, draft, subprocessTriggerText = '', filterEvent
     const parsedRule = rawRule ? JSON.parse(rawRule) : {};
     return {
       ...serializeReverseOutput(draft),
-      rule: isEmptyJsonValue(parsedRule) ? null : JSON.stringify(parsedRule, null, 2),
+      rule: isEmptyJsonValue(parsedRule) ? null : stringifyCompactJsonLogicForEditor(parsedRule),
     };
   }
 
@@ -2620,1769 +1976,7 @@ function getNodePreviewPayload(kind, draft, subprocessTriggerText = '', filterEv
   return getNodeSavePayload(kind, draft, subprocessTriggerText, filterEventRuleText, reverseOutputRuleText);
 }
 
-const NodeEditor = forwardRef(function NodeEditor({
-  processConfig,
-  selectedNodeId,
-  onSave,
-  onDraftChange,
-  onAutosaveStatusChange,
-  onOpenJsonLogicPlayground,
-  onAddSubprocess,
-  onBulkCreateResults,
-  onError,
-  contextCodeOptions,
-  phaseOptions,
-  b3StatusOptions,
-  slaDurationUnitOptions,
-  slaStatusOptions,
-  isSaving,
-}, ref) {
-  const selected = findSelectedNode(processConfig, selectedNodeId);
-  const [draft, setDraft] = useState({});
-  const [bulkResultInput, setBulkResultInput] = useState('');
-  const [subprocessTriggerText, setSubprocessTriggerText] = useState('');
-  const [subprocessTriggerError, setSubprocessTriggerError] = useState('');
-  const [subprocessTriggerStatus, setSubprocessTriggerStatus] = useState('valid');
-  const [filterEventRuleText, setFilterEventRuleText] = useState('');
-  const [filterEventRuleError, setFilterEventRuleError] = useState('');
-  const [filterEventRuleStatus, setFilterEventRuleStatus] = useState('valid');
-  const [reverseOutputRuleText, setReverseOutputRuleText] = useState('');
-  const [reverseOutputRuleError, setReverseOutputRuleError] = useState('');
-  const [reverseOutputRuleStatus, setReverseOutputRuleStatus] = useState('valid');
-  const draftRef = useRef({});
-  const autosaveTimeoutRef = useRef(null);
-  const autosaveIntervalRef = useRef(null);
-  const autosaveDeadlineRef = useRef(null);
-  const lastSavedPayloadRef = useRef('');
-  const onSaveRef = useRef(onSave);
-  const onDraftChangeRef = useRef(onDraftChange);
-  const onAutosaveStatusChangeRef = useRef(onAutosaveStatusChange);
-  const onErrorRef = useRef(onError);
-  const selectedKind = selected?.kind ?? null;
-  const selectedNodeSnapshot = selected?.node ? JSON.stringify(selected.node) : '';
-
-  const publishAutosaveStatus = (remainingMs) => {
-    if (remainingMs == null || remainingMs <= 0) {
-      onAutosaveStatusChangeRef.current?.(null);
-      return;
-    }
-
-    onAutosaveStatusChangeRef.current?.({
-      secondsLeft: Math.ceil(remainingMs / 1000),
-    });
-  };
-
-  const clearAutosaveScheduling = () => {
-    if (autosaveTimeoutRef.current) {
-      clearTimeout(autosaveTimeoutRef.current);
-      autosaveTimeoutRef.current = null;
-    }
-    if (autosaveIntervalRef.current) {
-      clearInterval(autosaveIntervalRef.current);
-      autosaveIntervalRef.current = null;
-    }
-    autosaveDeadlineRef.current = null;
-    publishAutosaveStatus(null);
-  };
-
-  useEffect(() => {
-    onSaveRef.current = onSave;
-  }, [onSave]);
-
-  useEffect(() => {
-    onDraftChangeRef.current = onDraftChange;
-  }, [onDraftChange]);
-
-  useEffect(() => {
-    onAutosaveStatusChangeRef.current = onAutosaveStatusChange;
-  }, [onAutosaveStatusChange]);
-
-  useEffect(() => {
-    onErrorRef.current = onError;
-  }, [onError]);
-
-  useEffect(() => {
-    setDraft(selected?.node ?? {});
-    draftRef.current = selected?.node ?? {};
-    try {
-      const payload = getNodeSavePayload(
-        selected?.kind,
-        selected?.node ?? {},
-        selected?.node?.trigger?.rule ?? '',
-        selected?.kind === 'stage' ? selected?.node?.configurator?.filterEventRule ?? '' : '',
-        selected?.kind === 'reverseOutput' ? selected?.node?.rule ?? '' : '',
-      );
-      lastSavedPayloadRef.current = payload ? JSON.stringify(payload) : '';
-    } catch {
-      lastSavedPayloadRef.current = '';
-    }
-  }, [selectedNodeId, selectedNodeSnapshot]);
-
-  useEffect(() => {
-    setBulkResultInput('');
-    clearAutosaveScheduling();
-  }, [selectedNodeId]);
-
-  useEffect(() => {
-    return () => {
-      clearAutosaveScheduling();
-    };
-  }, []);
-
-  useImperativeHandle(
-    ref,
-    () => ({
-      saveNow: async () => {
-        if (!selected) {
-          return false;
-        }
-
-        let nextPayload;
-        try {
-          nextPayload = getNodeSavePayload(
-            selectedKind,
-            draft,
-            subprocessTriggerText,
-            filterEventRuleText,
-            reverseOutputRuleText,
-          );
-        } catch {
-          return false;
-        }
-
-        const nextPayloadSnapshot = JSON.stringify(nextPayload);
-        if (nextPayloadSnapshot === lastSavedPayloadRef.current) {
-          clearAutosaveScheduling();
-          return true;
-        }
-
-        clearAutosaveScheduling();
-        const saved = await onSaveRef.current(nextPayload);
-        if (saved) {
-          lastSavedPayloadRef.current = nextPayloadSnapshot;
-        }
-
-        return saved;
-      },
-    }),
-    [draft, filterEventRuleText, ref, reverseOutputRuleText, selected, selectedKind, subprocessTriggerText],
-  );
-
-  useEffect(() => {
-    if (selected?.kind !== 'subprocess') {
-      setSubprocessTriggerText('');
-      setSubprocessTriggerError('');
-      setSubprocessTriggerStatus('valid');
-      return;
-    }
-
-    setSubprocessTriggerText(formatJsonSnippet(selected.node?.trigger?.rule ?? ''));
-    setSubprocessTriggerError('');
-    setSubprocessTriggerStatus('valid');
-  }, [selectedNodeId, selected?.kind, selected?.node?.trigger?.rule]);
-
-  useEffect(() => {
-    if (selected?.kind !== 'subprocess') {
-      return;
-    }
-    try {
-      const rawTrigger = subprocessTriggerText.trim();
-      JSON.parse(rawTrigger || '{}');
-      setSubprocessTriggerError('');
-      setSubprocessTriggerStatus('valid');
-    } catch {
-      setSubprocessTriggerError('Невалидный JSON.');
-      setSubprocessTriggerStatus('invalid');
-    }
-  }, [selected?.kind, subprocessTriggerText]);
-
-  useEffect(() => {
-    if (selected?.kind !== 'stage') {
-      setFilterEventRuleText('');
-      setFilterEventRuleError('');
-      setFilterEventRuleStatus('valid');
-      return;
-    }
-
-    setFilterEventRuleText(formatJsonSnippet(selected.node?.configurator?.filterEventRule ?? ''));
-    setFilterEventRuleError('');
-    setFilterEventRuleStatus('valid');
-  }, [selectedNodeId, selected?.kind, selected?.node?.configurator?.filterEventRule]);
-
-  useEffect(() => {
-    if (selected?.kind !== 'stage') {
-      return;
-    }
-    try {
-      const rawFilterEventRule = filterEventRuleText.trim();
-      JSON.parse(rawFilterEventRule || '{}');
-      setFilterEventRuleError('');
-      setFilterEventRuleStatus('valid');
-    } catch {
-      setFilterEventRuleError('Невалидный JSON.');
-      setFilterEventRuleStatus('invalid');
-    }
-  }, [selected?.kind, filterEventRuleText]);
-
-  useEffect(() => {
-    if (selected?.kind !== 'reverseOutput') {
-      setReverseOutputRuleText('');
-      setReverseOutputRuleError('');
-      setReverseOutputRuleStatus('valid');
-      return;
-    }
-
-    setReverseOutputRuleText(formatJsonSnippet(selected.node?.rule ?? ''));
-    setReverseOutputRuleError('');
-    setReverseOutputRuleStatus('valid');
-  }, [selectedNodeId, selected?.kind, selected?.node?.rule]);
-
-  useEffect(() => {
-    if (selected?.kind !== 'reverseOutput') {
-      return;
-    }
-    try {
-      const rawRule = reverseOutputRuleText.trim();
-      JSON.parse(rawRule || '{}');
-      setReverseOutputRuleError('');
-      setReverseOutputRuleStatus('valid');
-    } catch {
-      setReverseOutputRuleError('Невалидный JSON.');
-      setReverseOutputRuleStatus('invalid');
-    }
-  }, [selected?.kind, reverseOutputRuleText]);
-
-  useEffect(() => {
-    if (!selected) {
-      return undefined;
-    }
-
-    const previewPayload = getNodePreviewPayload(
-      selectedKind,
-      draft,
-      subprocessTriggerText,
-      filterEventRuleText,
-      reverseOutputRuleText,
-    );
-    onDraftChangeRef.current(previewPayload);
-
-    let nextPayload;
-    try {
-      nextPayload = getNodeSavePayload(
-        selectedKind,
-        draft,
-        subprocessTriggerText,
-        filterEventRuleText,
-        reverseOutputRuleText,
-      );
-    } catch {
-      return undefined;
-    }
-
-    const nextPayloadSnapshot = JSON.stringify(nextPayload);
-    if (nextPayloadSnapshot === lastSavedPayloadRef.current) {
-      clearAutosaveScheduling();
-      return undefined;
-    }
-
-    clearAutosaveScheduling();
-    autosaveDeadlineRef.current = Date.now() + NODE_AUTOSAVE_DELAY_MS;
-    publishAutosaveStatus(NODE_AUTOSAVE_DELAY_MS);
-    autosaveIntervalRef.current = window.setInterval(() => {
-      const remainingMs = (autosaveDeadlineRef.current ?? 0) - Date.now();
-      if (remainingMs <= 0) {
-        if (autosaveIntervalRef.current) {
-          clearInterval(autosaveIntervalRef.current);
-          autosaveIntervalRef.current = null;
-        }
-        publishAutosaveStatus(null);
-        return;
-      }
-
-      publishAutosaveStatus(remainingMs);
-    }, 250);
-
-    autosaveTimeoutRef.current = window.setTimeout(() => {
-      if (autosaveIntervalRef.current) {
-        clearInterval(autosaveIntervalRef.current);
-        autosaveIntervalRef.current = null;
-      }
-      autosaveTimeoutRef.current = null;
-      autosaveDeadlineRef.current = null;
-      publishAutosaveStatus(null);
-      Promise.resolve(onSaveRef.current(nextPayload))
-        .then((saved) => {
-          if (saved) {
-            lastSavedPayloadRef.current = nextPayloadSnapshot;
-          }
-        })
-        .catch((saveError) => {
-          onErrorRef.current?.(saveError, 'Не удалось автоматически сохранить изменения.');
-        });
-    }, NODE_AUTOSAVE_DELAY_MS);
-
-    return () => {
-      clearAutosaveScheduling();
-    };
-  }, [draft, selectedKind, selectedNodeId, subprocessTriggerText, filterEventRuleText, reverseOutputRuleText]);
-
-  const handleFormatSubprocessTrigger = () => {
-    try {
-      const rawTrigger = subprocessTriggerText.trim();
-      const parsedTrigger = rawTrigger ? JSON.parse(rawTrigger) : {};
-      setSubprocessTriggerText(JSON.stringify(parsedTrigger, null, 2));
-      setSubprocessTriggerError('');
-      setSubprocessTriggerStatus('valid');
-    } catch {
-      const errorMessage = 'Trigger rule должен быть валидным JSON, чтобы его можно было форматировать.';
-      setSubprocessTriggerError(errorMessage);
-      setSubprocessTriggerStatus('invalid');
-      onErrorRef.current?.(errorMessage, errorMessage);
-    }
-  };
-
-  const handleFormatFilterEventRule = () => {
-    try {
-      const rawFilterEventRule = filterEventRuleText.trim();
-      const parsedFilterEventRule = rawFilterEventRule ? JSON.parse(rawFilterEventRule) : {};
-      setFilterEventRuleText(JSON.stringify(parsedFilterEventRule, null, 2));
-      setFilterEventRuleError('');
-      setFilterEventRuleStatus('valid');
-    } catch {
-      const errorMessage = 'Filter event rule должен быть валидным JSON, чтобы его можно было форматировать.';
-      setFilterEventRuleError(errorMessage);
-      setFilterEventRuleStatus('invalid');
-      onErrorRef.current?.(errorMessage, errorMessage);
-    }
-  };
-
-  const handleFormatReverseOutputRule = () => {
-    try {
-      const rawRule = reverseOutputRuleText.trim();
-      const parsedRule = rawRule ? JSON.parse(rawRule) : {};
-      setReverseOutputRuleText(JSON.stringify(parsedRule, null, 2));
-      setReverseOutputRuleError('');
-      setReverseOutputRuleStatus('valid');
-    } catch {
-      const errorMessage = 'Правило должно быть валидным JSON, чтобы его можно было форматировать.';
-      setReverseOutputRuleError(errorMessage);
-      setReverseOutputRuleStatus('invalid');
-      onErrorRef.current?.(errorMessage, errorMessage);
-    }
-  };
-
-  if (!selected) {
-    return null;
-  }
-
-  const updateDraftPath = (path, value) => {
-    setDraft((current) => updateNestedValue(current, path, value));
-  };
-
-  const updateReverseOutputDraft = (updater) => {
-    const nextDraft = updater(draftRef.current);
-    draftRef.current = nextDraft;
-    setDraft(nextDraft);
-  };
-
-  const updateDraftArrayItem = (path, index, updater) => {
-    setDraft((current) => {
-      const targetArray = path.reduce((acc, key) => acc?.[key], current) ?? [];
-      return updateNestedValue(current, path, updateItemAt(targetArray, index, updater));
-    });
-  };
-
-  const addDraftArrayItem = (path, item) => {
-    setDraft((current) => {
-      const targetArray = path.reduce((acc, key) => acc?.[key], current) ?? [];
-      return updateNestedValue(current, path, [...targetArray, item]);
-    });
-  };
-
-  const removeDraftArrayItem = (path, index) => {
-    setDraft((current) => {
-      const targetArray = path.reduce((acc, key) => acc?.[key], current) ?? [];
-      return updateNestedValue(
-        current,
-        path,
-        targetArray.filter((_, itemIndex) => itemIndex !== index),
-      );
-    });
-  };
-
-  const updateResultInputScenario = (index, value) => {
-    setDraft((current) => {
-      const targetArray = current.inputScenarios?.length ? [...current.inputScenarios] : [''];
-      targetArray[index] = value;
-      return {
-        ...current,
-        inputScenarios: targetArray,
-      };
-    });
-  };
-
-  const createDefaultResult = () => ({
-    inputScenarios: [],
-    reverse: [],
-  });
-
-  const createDefaultReverse = () => ({
-    status: { code: '' },
-    output: [],
-  });
-
-  const createDefaultOutput = () => ({
-    phase: { code: '' },
-    name: '',
-    rule: '',
-    body: {
-      type: '',
-      eventObject: {
-        type: '',
-      },
-      service: {
-        scenario: '',
-        type: '',
-        status: '',
-        sla: {
-          durationValue: '',
-          durationUnit: { code: '' },
-          status: { code: '' },
-        },
-      },
-    },
-    log: {
-      journalServiceName: '',
-      message: '',
-    },
-    parent: {
-      include: true,
-      mode: 'SURFACE',
-    },
-  });
-
-  return (
-    <Card className="editor-card">
-      <CardBody>
-        <Form>
-          {(selected.kind === 'process' || selected.kind === 'subprocess') && (
-            <>
-              {(selected.kind === 'process' || selected.kind === 'subprocess') && (
-                <>
-                  <FormGroup
-                    label={
-                      selected.kind === 'process'
-                        ? 'Название процесса'
-                        : selected.kind === 'subprocess'
-                          ? 'Название подпроцесса'
-                          : 'Название'
-                    }
-                    fieldId="process-node-name"
-                  >
-                    <TextInput
-                      id="process-node-name"
-                      value={draft.nodeName ?? ''}
-                      onChange={(_, value) => setDraft((current) => ({ ...current, nodeName: value }))}
-                    />
-                    {selected.kind === 'process' && (
-                      <Text component="small">Название процесса необходимо для визуальной идентификации.</Text>
-                    )}
-                    {selected.kind === 'subprocess' && (
-                      <Text component="small">Название подпроцесса необходимо для визуальной идентификации.</Text>
-                    )}
-                  </FormGroup>
-                  <FormGroup
-                    label={
-                      selected.kind === 'process'
-                        ? 'Описание процесса'
-                        : selected.kind === 'subprocess'
-                          ? 'Описание подпроцесса'
-                          : 'Описание'
-                    }
-                    fieldId="process-node-comment"
-                  >
-                    <TextArea
-                      id="process-node-comment"
-                      value={draft.nodeComment ?? ''}
-                      onChange={(_, value) => setDraft((current) => ({ ...current, nodeComment: value }))}
-                      resizeOrientation="vertical"
-                    />
-                    {selected.kind === 'process' && (
-                      <Text component="small">Описание процесса необходимо для описания назначения процесса.</Text>
-                    )}
-                    {selected.kind === 'subprocess' && (
-                      <Text component="small">Описание подпроцесса необходимо для описания назначения подпроцесса.</Text>
-                    )}
-                  </FormGroup>
-                </>
-              )}
-              {selected.kind === 'process' && (
-                <FormGroup label="Код процесса" fieldId="node-context-code">
-                  <ProcessSelectField
-                    id="node-context-code"
-                    value={draft.contextCode?.code ?? ''}
-                    onChange={(next) => updateDraftPath(['contextCode', 'code'], next)}
-                    options={contextCodeOptions}
-                    placeholder="Выберите context code"
-                  />
-                  <Text component="small">
-                    Код процесса необязателен. Установить в случае необходимости использования в конкретной реализации
-                    информации о коде процесса
-                  </Text>
-                </FormGroup>
-              )}
-            </>
-          )}
-
-          {selected.kind === 'stage' && (
-            <>
-              <FormGroup label="Исполнитель" fieldId="stage-executor">
-                <TextInput
-                  id="stage-executor"
-                  value={draft.executor ?? ''}
-                  onChange={(_, value) => setDraft((current) => ({ ...current, executor: value }))}
-                />
-              </FormGroup>
-              <FormGroup label="Context code" fieldId="stage-context-code">
-                <ProcessSelectField
-                  id="stage-context-code"
-                  value={draft.contextCode?.code ?? ''}
-                  onChange={(next) => updateDraftPath(['contextCode', 'code'], next)}
-                  options={contextCodeOptions}
-                  placeholder="Выберите context code"
-                />
-                <Text component="small">Context code стадии необязателен.</Text>
-              </FormGroup>
-              <FormGroup label="Название" fieldId="stage-node-name">
-                <TextInput
-                  id="stage-node-name"
-                  value={draft.nodeName ?? ''}
-                  onChange={(_, value) => setDraft((current) => ({ ...current, nodeName: value }))}
-                />
-                <Text component="small">{NODE_NAME_HELPER_TEXT}</Text>
-              </FormGroup>
-              <FormGroup label="Описание" fieldId="stage-node-comment">
-                <TextArea
-                  id="stage-node-comment"
-                  value={draft.nodeComment ?? ''}
-                  onChange={(_, value) => setDraft((current) => ({ ...current, nodeComment: value }))}
-                  resizeOrientation="vertical"
-                />
-                <Text component="small">{NODE_COMMENT_HELPER_TEXT}</Text>
-              </FormGroup>
-              <div className="stage-editor-section">
-                <div className="stage-editor-inline-header">
-                  <Title headingLevel="h4">Правило JsonLogic</Title>
-                  <span
-                    className={
-                      filterEventRuleStatus === 'valid'
-                        ? 'json-status json-status-valid'
-                        : 'json-status json-status-invalid'
-                    }
-                  >
-                    {filterEventRuleStatus === 'valid' ? (
-                      <CheckVerified02 aria-hidden size={16} />
-                    ) : (
-                      <XCircle aria-hidden size={16} />
-                    )}
-                    {filterEventRuleStatus === 'valid' ? 'JSON валиден' : 'JSON невалиден'}
-                  </span>
-                </div>
-                <JsonSnippetEditor
-                  id="stage-filter-event-rule"
-                  value={filterEventRuleText}
-                  onChange={(value) => {
-                    setFilterEventRuleText(value);
-                  }}
-                  onBeautify={handleFormatFilterEventRule}
-                  onOpenPlayground={() =>
-                    onOpenJsonLogicPlayground?.('Playground для Filter event rule', filterEventRuleText)
-                  }
-                  helperText="Редактируйте Filter event rule как JSON. Для выравнивания отступов используйте кнопку форматирования."
-                  error={filterEventRuleError}
-                />
-                <Text component="small">
-                  Каждое событие, необходимое для фильтрации, будет проверено данным правилом. Если событие будет
-                  проходить по данному правилу, то оно будет обработано, в ином случае стадия будет проигнорирована.
-                </Text>
-              </div>
-              <div className="stage-editor-section">
-                <Title headingLevel="h4">Настройка состояния стадии</Title>
-                <div className="stage-editor-grid">
-                  <div className="stage-toggle-option">
-                    <Checkbox
-                      id="stage-configurator-disabled"
-                      isChecked={Boolean(draft.configurator?.disabled)}
-                      onChange={(_, checked) => updateDraftPath(['configurator', 'disabled'], checked)}
-                      label="Выключить"
-                    />
-                    <Text component="small" className="stage-toggle-option__hint">
-                      При выключении стадия не будет обрабатывать поступающие события.
-                    </Text>
-                  </div>
-                  <div className="stage-toggle-option">
-                    <Checkbox
-                      id="stage-configurator-interrupted"
-                      isChecked={Boolean(draft.configurator?.interrupted)}
-                      onChange={(_, checked) => updateDraftPath(['configurator', 'interrupted'], checked)}
-                      label="Прерываемая"
-                    />
-                    <Text component="small" className="stage-toggle-option__hint">
-                      Прерываемая стадия будет завершать весь подпроцесс при возникновении исключения, в ином случае
-                      исключение будет проигнорировано и выполнение стадии с исключением не приведет к остановке
-                      исполнения.
-                    </Text>
-                  </div>
-                  <div className="stage-toggle-option">
-                    <Checkbox
-                      id="stage-configurator-multiple"
-                      isChecked={Boolean(draft.configurator?.multiple)}
-                      onChange={(_, checked) => updateDraftPath(['configurator', 'multiple'], checked)}
-                      label="Множественная обработка"
-                    />
-                    <Text component="small" className="stage-toggle-option__hint">
-                      Может применять множество событий, подходящих под фильтр.
-                    </Text>
-                  </div>
-                </div>
-                <div className="stage-editor-subsection">
-                  <Title headingLevel="h5">Настройка аудита</Title>
-                  <div className="stage-editor-grid">
-                    <div className="stage-toggle-option">
-                      <Checkbox
-                        id="stage-audit-enabled"
-                        isChecked={Boolean(draft.configurator?.audit?.enabled)}
-                        onChange={(_, checked) => updateDraftPath(['configurator', 'audit', 'enabled'], checked)}
-                        label="Включить"
-                      />
-                      <Text component="small" className="stage-toggle-option__hint">
-                        При включении аудит будет записывать информацию по обработке событий для данной стадии.
-                      </Text>
-                    </div>
-                  </div>
-                  <FormGroup label="Код события" fieldId="stage-audit-event-code">
-                    <TextInput
-                      id="stage-audit-event-code"
-                      value={draft.configurator?.audit?.eventCode ?? ''}
-                      onChange={(_, value) => updateDraftPath(['configurator', 'audit', 'eventCode'], value)}
-                    />
-                  </FormGroup>
-                  <FormGroup label="Описание события" fieldId="stage-audit-event-description">
-                    <TextInput
-                      id="stage-audit-event-description"
-                      value={draft.configurator?.audit?.eventDescription ?? ''}
-                      onChange={(_, value) => updateDraftPath(['configurator', 'audit', 'eventDescription'], value)}
-                    />
-                  </FormGroup>
-                </div>
-              </div>
-              <div className="stage-editor-section">
-                <Title headingLevel="h4">Настройки логирования</Title>
-                <FormGroup label="Название в интеграционном журнале" fieldId="stage-log-journal">
-                  <TextInput
-                    id="stage-log-journal"
-                    value={draft.log?.journalServiceName ?? ''}
-                    onChange={(_, value) => updateDraftPath(['log', 'journalServiceName'], value)}
-                  />
-                </FormGroup>
-              </div>
-            </>
-          )}
-
-          {selected.kind === 'subprocess' && (
-            <div className="stage-editor-section">
-              <div className="stage-editor-inline-header">
-                <Title headingLevel="h5">JsonLogic правило запуска</Title>
-                <span
-                  className={
-                    subprocessTriggerStatus === 'valid'
-                      ? 'json-status json-status-valid'
-                      : 'json-status json-status-invalid'
-                  }
-                >
-                  {subprocessTriggerStatus === 'valid' ? (
-                    <CheckVerified02 aria-hidden size={16} />
-                  ) : (
-                    <XCircle aria-hidden size={16} />
-                  )}
-                  {subprocessTriggerStatus === 'valid' ? 'JSON валиден' : 'JSON невалиден'}
-                </span>
-              </div>
-              <JsonSnippetEditor
-                id="subprocess-trigger"
-                value={subprocessTriggerText}
-                onChange={(value) => {
-                  setSubprocessTriggerText(value);
-                }}
-                onBeautify={handleFormatSubprocessTrigger}
-                onOpenPlayground={() =>
-                  onOpenJsonLogicPlayground?.('Playground для JsonLogic правила запуска', subprocessTriggerText)
-                }
-                helperText="Редактируйте JsonLogic правило запуска как JSON. Для выравнивания отступов используйте кнопку форматирования."
-                error={subprocessTriggerError}
-              />
-            </div>
-          )}
-
-          {selected.kind === 'result' && (
-            <div className="stage-editor-section reverse-output-editor-section">
-              <FormGroup label="Обрабатываемые входящие сценарии" fieldId="result-input-scenarios-0">
-                <div className="space-y-3">
-                  {(draft.inputScenarios?.length ? draft.inputScenarios : ['']).map((scenario, index) => (
-                    <div key={`result-input-scenario-${index}`} className="flex items-center gap-3">
-                      <TextInput
-                        id={`result-input-scenarios-${index}`}
-                        value={scenario}
-                        placeholder="Введите сценарий"
-                        onChange={(_, value) => updateResultInputScenario(index, value)}
-                      />
-                      <Button
-                        variant="plain"
-                        aria-label={`Удалить сценарий ${index + 1}`}
-                        onClick={() => removeDraftArrayItem(['inputScenarios'], index)}
-                      >
-                        <Trash01 aria-hidden size={18} />
-                      </Button>
-                    </div>
-                  ))}
-                  <Button
-                    variant="secondary"
-                    onClick={() => addDraftArrayItem(['inputScenarios'], '')}
-                    className="w-full sm:w-auto"
-                  >
-                    <Plus aria-hidden size={18} />
-                    Добавить сценарий
-                  </Button>
-                </div>
-                <Text component="small">
-                  Укажите сценарии, на которые система должна отвечать. Если во входящем событии значение
-                  `b3event.body.service.scenario` совпадет с одним из этих сценариев или подходящим паттерном,
-                  событие будет принято в обработку для формирования ответного события.
-                </Text>
-              </FormGroup>
-            </div>
-          )}
-
-          {selected.kind === 'reverse' && (
-            <div className="stage-editor-section">
-              <Title headingLevel="h4">Reverse</Title>
-              <FormGroup label="STATUS" fieldId="reverse-status-code">
-                <ProcessSelectField
-                  id="reverse-status-code"
-                  value={draft.status?.code ?? ''}
-                  onChange={(value) =>
-                    setDraft((current) => ({
-                      ...current,
-                      status: {
-                        ...(current.status ?? {}),
-                        code: value,
-                      },
-                    }))
-                  }
-                  options={b3StatusOptions}
-                  placeholder="Выберите STATUS"
-                />
-              </FormGroup>
-            </div>
-          )}
-
-          {selected.kind === 'reverseOutput' && (
-            <div className="stage-editor-section reverse-output-editor-section">
-              <FormGroup label="Тип события" fieldId="reverse-output-phase">
-                <ProcessSelectField
-                  id="reverse-output-phase"
-                  value={draft.phase?.code ?? ''}
-                  onChange={(code) =>
-                    updateReverseOutputDraft((current) => ({
-                      ...current,
-                      phase: {
-                        ...(current.phase ?? {}),
-                        code,
-                      },
-                    }))
-                  }
-                  options={phaseOptions}
-                  placeholder="Выберите тип события"
-                />
-                <Text component="small">
-                  Определяет, какой тип события будет отправлен в B3 Adapter.
-                </Text>
-              </FormGroup>
-              <FormGroup label="Идентификационное имя" fieldId="reverse-output-name">
-                <TextInput
-                  id="reverse-output-name"
-                  value={draft.name ?? ''}
-                  onChange={(_, value) => updateReverseOutputDraft((current) => ({ ...current, name: value }))}
-                />
-                <Text component="small">
-                  Позволяет определить строковой идентификатор события. Это имя можно использовать в коде при
-                  отправке события для выбора нужной конфигурации.
-                </Text>
-              </FormGroup>
-              <div className="stage-editor-subsection">
-                <div className="stage-editor-inline-header">
-                  <Title headingLevel="h5">Правило JsonLogic</Title>
-                  <span
-                    className={
-                      reverseOutputRuleStatus === 'valid'
-                        ? 'json-status json-status-valid'
-                        : 'json-status json-status-invalid'
-                    }
-                  >
-                    {reverseOutputRuleStatus === 'valid' ? (
-                      <CheckVerified02 aria-hidden size={16} />
-                    ) : (
-                      <XCircle aria-hidden size={16} />
-                    )}
-                    {reverseOutputRuleStatus === 'valid' ? 'JSON валиден' : 'JSON невалиден'}
-                  </span>
-                </div>
-                <JsonSnippetEditor
-                  id="reverse-output-rule"
-                  value={reverseOutputRuleText}
-                  onChange={(value) => {
-                    setReverseOutputRuleText(value);
-                  }}
-                  onBeautify={handleFormatReverseOutputRule}
-                  onOpenPlayground={() =>
-                    onOpenJsonLogicPlayground?.('Playground для правила JsonLogic отправки', reverseOutputRuleText)
-                  }
-                  helperText="Редактируйте правило для отправляемого события как JSON. Для выравнивания отступов используйте кнопку форматирования."
-                  error={reverseOutputRuleError}
-                />
-              </div>
-              <div className="stage-editor-subsection">
-                <Title headingLevel="h5">B3Event Body</Title>
-                <FormGroup label="B3Event.body.type" fieldId="reverse-output-body-type">
-                  <TextInput
-                    id="reverse-output-body-type"
-                    value={draft.body?.type ?? ''}
-                    onChange={(_, value) =>
-                      updateReverseOutputDraft((current) => ({
-                        ...current,
-                        body: {
-                          ...(current.body ?? {}),
-                          type: value,
-                        },
-                      }))
-                    }
-                  />
-                </FormGroup>
-                <FormGroup label="B3Event.body.status" fieldId="reverse-output-event-object-type">
-                  <TextInput
-                    id="reverse-output-event-object-type"
-                    value={draft.body?.eventObject?.type ?? ''}
-                    onChange={(_, value) =>
-                      updateReverseOutputDraft((current) => ({
-                        ...current,
-                        body: {
-                          ...(current.body ?? {}),
-                          eventObject: {
-                            ...(current.body?.eventObject ?? {}),
-                            type: value,
-                          },
-                        },
-                      }))
-                    }
-                  />
-                </FormGroup>
-              </div>
-              <div className="stage-editor-subsection">
-                <Title headingLevel="h5">B3Event Service</Title>
-                <FormGroup label="B3Event.body.service.scenario" fieldId="reverse-output-service-scenario">
-                  <TextInput
-                    id="reverse-output-service-scenario"
-                    value={draft.body?.service?.scenario ?? ''}
-                    onChange={(_, value) =>
-                      updateReverseOutputDraft((current) => ({
-                        ...current,
-                        body: {
-                          ...(current.body ?? {}),
-                          service: {
-                            ...(current.body?.service ?? {}),
-                            scenario: value,
-                          },
-                        },
-                      }))
-                    }
-                  />
-                </FormGroup>
-                <FormGroup label="B3Event.body.service.type" fieldId="reverse-output-service-type">
-                  <TextInput
-                    id="reverse-output-service-type"
-                    value={draft.body?.service?.type ?? ''}
-                    onChange={(_, value) =>
-                      updateReverseOutputDraft((current) => ({
-                        ...current,
-                        body: {
-                          ...(current.body ?? {}),
-                          service: {
-                            ...(current.body?.service ?? {}),
-                            type: value,
-                          },
-                        },
-                      }))
-                    }
-                  />
-                </FormGroup>
-                <FormGroup label="B3Event.body.service.status" fieldId="reverse-output-service-status">
-                  <ProcessSelectField
-                    id="reverse-output-service-status"
-                    value={draft.body?.service?.status?.code ?? ''}
-                    onChange={(code) =>
-                      updateReverseOutputDraft((current) => ({
-                        ...current,
-                        body: {
-                          ...(current.body ?? {}),
-                          service: {
-                            ...(current.body?.service ?? {}),
-                            status: {
-                              ...(current.body?.service?.status ?? {}),
-                              code,
-                            },
-                          },
-                        },
-                      }))
-                    }
-                    options={b3StatusOptions}
-                    placeholder="Выберите статус B3"
-                  />
-                </FormGroup>
-              </div>
-              <div className="stage-editor-subsection">
-                <Title headingLevel="h5">SLA</Title>
-                <FormGroup label="B3Event.body.service.slaState.durationValue" fieldId="reverse-output-sla-duration-value">
-                  <TextInput
-                    id="reverse-output-sla-duration-value"
-                    value={draft.body?.service?.sla?.durationValue ?? ''}
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    onChange={(_, value) =>
-                      updateReverseOutputDraft((current) => ({
-                        ...current,
-                        body: {
-                          ...(current.body ?? {}),
-                          service: {
-                            ...(current.body?.service ?? {}),
-                            sla: {
-                              ...(current.body?.service?.sla ?? {}),
-                              durationValue: value.replace(/\D/g, ''),
-                            },
-                          },
-                        },
-                      }))
-                    }
-                  />
-                  <Text component="small">Это значение длительности SLA.</Text>
-                </FormGroup>
-                <FormGroup label="B3Event.body.service.slaState.durationUnit" fieldId="reverse-output-sla-duration-unit">
-                  <ProcessSelectField
-                    id="reverse-output-sla-duration-unit"
-                    value={draft.body?.service?.sla?.durationUnit?.code ?? ''}
-                    onChange={(value) =>
-                      updateReverseOutputDraft((current) => ({
-                        ...current,
-                        body: {
-                          ...(current.body ?? {}),
-                          service: {
-                            ...(current.body?.service ?? {}),
-                            sla: {
-                              ...(current.body?.service?.sla ?? {}),
-                              durationUnit: {
-                                ...(current.body?.service?.sla?.durationUnit ?? {}),
-                                code: value,
-                              },
-                            },
-                          },
-                        },
-                      }))
-                    }
-                    options={slaDurationUnitOptions}
-                    placeholder="Выберите единицу длительности SLA"
-                  />
-                  <Text component="small">Это единица длительности SLA.</Text>
-                </FormGroup>
-                <FormGroup label="B3Event.body.service.slaState.status" fieldId="reverse-output-sla-status">
-                  <ProcessSelectField
-                    id="reverse-output-sla-status"
-                    value={draft.body?.service?.sla?.status?.code ?? ''}
-                    onChange={(code) =>
-                      updateReverseOutputDraft((current) => ({
-                        ...current,
-                        body: {
-                          ...(current.body ?? {}),
-                          service: {
-                            ...(current.body?.service ?? {}),
-                            sla: {
-                              ...(current.body?.service?.sla ?? {}),
-                              status: {
-                                ...(current.body?.service?.sla?.status ?? {}),
-                                code,
-                              },
-                            },
-                          },
-                        },
-                      }))
-                    }
-                    options={slaStatusOptions}
-                    placeholder="Выберите статус SLA"
-                  />
-                  <Text component="small">Это статус SLA.</Text>
-                </FormGroup>
-              </div>
-              <div className="stage-editor-subsection">
-                <Title headingLevel="h5">Родительский процесс</Title>
-                <FormGroup label="" fieldId="reverse-output-parent-include">
-                  <Checkbox
-                    id="reverse-output-parent-include"
-                    isChecked={draft.parent?.include ?? true}
-                    onChange={(_, checked) =>
-                      updateReverseOutputDraft((current) => ({
-                        ...current,
-                        parent: {
-                          ...(current.parent ?? {}),
-                          include: checked,
-                          mode: current.parent?.mode ?? 'SURFACE',
-                        },
-                      }))
-                    }
-                    label="Включить установку родительского процесса"
-                  />
-                </FormGroup>
-                <FormGroup label="Источник родительского процесса" fieldId="reverse-output-parent-mode">
-                  <ProcessSelectField
-                    id="reverse-output-parent-mode"
-                    value={draft.parent?.mode ?? 'SURFACE'}
-                    onChange={(mode) =>
-                      updateReverseOutputDraft((current) => ({
-                        ...current,
-                        parent: {
-                          ...(current.parent ?? {}),
-                          include: current.parent?.include ?? true,
-                          mode: mode || 'SURFACE',
-                        },
-                      }))
-                    }
-                    options={[
-                      {
-                        value: 'SURFACE',
-                        label: 'SURFACE',
-                        description: 'Устанавливать из входящего события',
-                      },
-                      {
-                        value: 'DEEP',
-                        label: 'DEEP',
-                        description: 'Устанавливать из родителя входящего события',
-                      },
-                    ]}
-                    placeholder="Выберите источник"
-                  />
-                </FormGroup>
-              </div>
-              <div className="stage-editor-subsection">
-                <Title headingLevel="h5">Настройки интеграционного журналирования</Title>
-                <FormGroup label="Название сервиса" fieldId="reverse-output-log-journal">
-                  <TextInput
-                    id="reverse-output-log-journal"
-                    value={draft.log?.journalServiceName ?? ''}
-                    onChange={(_, value) =>
-                      updateReverseOutputDraft((current) => ({
-                        ...current,
-                        log: {
-                          ...(current.log ?? {}),
-                          journalServiceName: value,
-                        },
-                      }))
-                    }
-                  />
-                  <Text component="small">
-                    С данным названием сервиса в интеграционном журнале будет добавлена запись отправленного события.
-                  </Text>
-                </FormGroup>
-                <FormGroup label="Сообщение" fieldId="reverse-output-log-message">
-                  <TextArea
-                    id="reverse-output-log-message"
-                    value={draft.log?.message ?? ''}
-                    onChange={(_, value) =>
-                      updateReverseOutputDraft((current) => ({
-                        ...current,
-                        log: {
-                          ...(current.log ?? {}),
-                          message: value,
-                        },
-                      }))
-                    }
-                    resizeOrientation="vertical"
-                  />
-                  <Text component="small">
-                    Данное сообщение будет добавлено к записи отправленного события в интеграционном журнале.
-                  </Text>
-                </FormGroup>
-              </div>
-            </div>
-          )}
-
-          <div className="editor-actions">
-          </div>
-        </Form>
-      </CardBody>
-    </Card>
-  );
-});
-
-function NodeOrderEditor({ processConfig, selectedNodeId, onReorderStages, onReorderReverseOutputs, isSaving }) {
-  const selected = findSelectedNode(processConfig, selectedNodeId);
-  const [itemOrder, setItemOrder] = useState([]);
-  const [draggedItemId, setDraggedItemId] = useState(null);
-  const itemOrderRef = useRef([]);
-  const selectedItemIds =
-    selected?.kind === 'subprocess'
-      ? (selected.node?.stages ?? []).map((stage) => String(stage.id)).join('|')
-      : selected?.kind === 'reverse'
-        ? (selected.node?.output ?? []).map((output) => String(output.id)).join('|')
-        : '';
-
-  useEffect(() => {
-    if (selected?.kind !== 'subprocess' && selected?.kind !== 'reverse') {
-      setItemOrder([]);
-      itemOrderRef.current = [];
-      setDraggedItemId(null);
-      return;
-    }
-
-    const nextItemOrder =
-      selected.kind === 'subprocess'
-        ? (selected.node?.stages ?? []).map((stage) => String(stage.id))
-        : (selected.node?.output ?? []).map((output) => String(output.id));
-    setItemOrder(nextItemOrder);
-    itemOrderRef.current = nextItemOrder;
-    setDraggedItemId(null);
-  }, [selectedNodeId, selected?.kind, selectedItemIds]);
-
-  const orderedItems =
-    selected?.kind === 'subprocess'
-      ? itemOrder
-          .map((stageId) => (selected.node?.stages ?? []).find((stage) => String(stage.id) === stageId))
-          .filter(Boolean)
-      : selected?.kind === 'reverse'
-        ? itemOrder
-            .map((outputId) => (selected.node?.output ?? []).find((output) => String(output.id) === outputId))
-            .filter(Boolean)
-      : [];
-
-  const handlePointerDown = (itemId) => {
-    setDraggedItemId(itemId);
-  };
-
-  const handlePointerEnter = (targetItemId) => {
-    if (!draggedItemId || draggedItemId === targetItemId) {
-      return;
-    }
-
-    const currentOrder = itemOrderRef.current;
-    const fromIndex = currentOrder.indexOf(draggedItemId);
-    const toIndex = currentOrder.indexOf(targetItemId);
-    if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) {
-      return;
-    }
-
-    const nextOrder = reorderItems(currentOrder, fromIndex, toIndex);
-    itemOrderRef.current = nextOrder;
-    setItemOrder(nextOrder);
-  };
-
-  const handlePointerUp = async () => {
-    const nextItemOrder = [...itemOrderRef.current];
-    setDraggedItemId(null);
-
-    if ((selected?.kind !== 'subprocess' && selected?.kind !== 'reverse') || !selected.node?.id) {
-      return;
-    }
-
-    if (nextItemOrder.join('|') === selectedItemIds) {
-      return;
-    }
-
-    if (selected.kind === 'subprocess') {
-      await onReorderStages(String(selected.node.id), nextItemOrder);
-      return;
-    }
-
-    await onReorderReverseOutputs(String(selected.node.id), nextItemOrder);
-  };
-
-  if (selected?.kind !== 'subprocess' && selected?.kind !== 'reverse') {
-    return null;
-  }
-
-  return (
-    <Card className="editor-card">
-      <CardBody>
-        <div className="stage-order-panel stage-order-panel-standalone">
-          <div className="stage-order-list">
-            {orderedItems.map((item, index) => {
-              const itemId = String(item.id);
-              const isStage = selected.kind === 'subprocess';
-              return (
-                <button
-                  key={itemId}
-                  type="button"
-                  disabled={isSaving}
-                  className={draggedItemId === itemId ? 'stage-order-item dragging' : 'stage-order-item'}
-                  onPointerDown={() => handlePointerDown(itemId)}
-                  onPointerEnter={() => handlePointerEnter(itemId)}
-                  onPointerUp={handlePointerUp}
-                  onPointerLeave={(event) => {
-                    if (event.buttons === 0 && draggedItemId) {
-                      handlePointerUp();
-                    }
-                  }}
-                >
-                  <span className="stage-order-item__index">{index + 1}</span>
-                  <span className="stage-order-item__content">
-                    <strong>
-                      {isStage
-                        ? item.nodeName || 'stage'
-                        : item.phase?.code
-                          ? formatReverseOutputEventType(item.phase.code)
-                          : item.name || 'reverse output'}
-                    </strong>
-                    <small>
-                      {isStage
-                        ? item.nodeComment || 'Без описания'
-                        : item.body?.service?.scenario || item.body?.type || 'Без описания'}
-                    </small>
-                  </span>
-                  <span className="stage-order-item__handle">::</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      </CardBody>
-    </Card>
-  );
-}
-
-function ProcessTreeSidebar({
-  processConfigs,
-  selectedProcessConfigId,
-  processTreeState,
-  expandedFolderIds,
-  onToggleFolder,
-  onCreateProcess,
-  onCreateFolder,
-  onRenameFolder,
-  onDeleteFolder,
-  onMoveProcess,
-  onSelectProcessConfig,
-  onImportProcessConfig,
-  onExportProcessConfig,
-  onDeleteProcessConfig,
-  isCreateProcessDisabled = false,
-}) {
-  const [dropTargetFolderId, setDropTargetFolderId] = useState(null);
-  const folders = processTreeState?.folders ?? [];
-  const processFolders = processTreeState?.processFolders ?? {};
-  const expandedFolderSet = useMemo(() => new Set(expandedFolderIds ?? []), [expandedFolderIds]);
-  const folderIds = useMemo(
-    () => new Set([ROOT_PROCESS_TREE_FOLDER_ID, ...folders.map((folder) => folder.id)]),
-    [folders],
-  );
-  const foldersByParent = useMemo(() => {
-    const next = new Map();
-    folders.forEach((folder) => {
-      const parentId = folderIds.has(folder.parentId) ? folder.parentId : ROOT_PROCESS_TREE_FOLDER_ID;
-      const current = next.get(parentId) ?? [];
-      current.push(folder);
-      next.set(parentId, current);
-    });
-
-    next.forEach((items) => {
-      items.sort((left, right) => left.name.localeCompare(right.name, 'ru'));
-    });
-
-    return next;
-  }, [folderIds, folders]);
-  const processesByFolder = useMemo(() => {
-    const next = new Map([[ROOT_PROCESS_TREE_FOLDER_ID, []]]);
-    processConfigs.forEach((processConfig) => {
-      const configuredFolderId = processFolders[String(processConfig.id)];
-      const folderId = folderIds.has(configuredFolderId) ? configuredFolderId : ROOT_PROCESS_TREE_FOLDER_ID;
-      const current = next.get(folderId) ?? [];
-      current.push(processConfig);
-      next.set(folderId, current);
-    });
-
-    next.forEach((items) => {
-      items.sort((left, right) => getProcessConfigDisplayName(left).localeCompare(getProcessConfigDisplayName(right), 'ru'));
-    });
-
-    return next;
-  }, [folderIds, processConfigs, processFolders]);
-
-  const handleDragStartProcess = (event, processConfigId) => {
-    event.dataTransfer.effectAllowed = 'move';
-    event.dataTransfer.setData(PROCESS_TREE_DRAG_TYPE, String(processConfigId));
-  };
-
-  const handleDragOverFolder = (event, folderId) => {
-    if (!Array.from(event.dataTransfer.types).includes(PROCESS_TREE_DRAG_TYPE)) {
-      return;
-    }
-
-    event.preventDefault();
-    event.dataTransfer.dropEffect = 'move';
-    setDropTargetFolderId(folderId);
-  };
-
-  const handleDropOnFolder = (event, folderId) => {
-    const processConfigId = event.dataTransfer.getData(PROCESS_TREE_DRAG_TYPE);
-    if (!processConfigId) {
-      return;
-    }
-
-    event.preventDefault();
-    event.stopPropagation();
-    setDropTargetFolderId(null);
-    onMoveProcess(processConfigId, folderId);
-  };
-
-  const countProcessesInsideFolder = (folderId, visitedFolderIds = new Set()) => {
-    if (visitedFolderIds.has(folderId)) {
-      return 0;
-    }
-
-    const nextVisited = new Set(visitedFolderIds);
-    nextVisited.add(folderId);
-
-    return (
-      (processesByFolder.get(folderId) ?? []).length +
-      (foldersByParent.get(folderId) ?? []).reduce(
-        (sum, childFolder) => sum + countProcessesInsideFolder(childFolder.id, nextVisited),
-        0,
-      )
-    );
-  };
-
-  const folderHasChildren = (folderId) =>
-    (foldersByParent.get(folderId) ?? []).length > 0 || (processesByFolder.get(folderId) ?? []).length > 0;
-
-  const renderProcess = (processConfig, level) => {
-    const processConfigId = String(processConfig.id);
-    const isSelected = processConfigId === selectedProcessConfigId;
-    const label = getProcessConfigDisplayName(processConfig);
-
-    return (
-      <div
-        key={processConfigId}
-        className={cn('process-tree__process', isSelected && 'process-tree__process--active')}
-        style={{ paddingLeft: `${0.45 + level * 0.9 + (level > 0 ? 1.95 : 0)}rem` }}
-        draggable
-        onDragStart={(event) => handleDragStartProcess(event, processConfigId)}
-      >
-        <button
-          type="button"
-          className="process-tree__process-main"
-          onClick={() => onSelectProcessConfig(processConfigId)}
-        >
-          <File02 aria-hidden size={16} className="process-tree__item-icon" />
-          <span className="process-tree__item-text">
-            <span className="process-tree__item-title">{label}</span>
-          </span>
-        </button>
-        <button
-          type="button"
-          className="process-tree__process-action process-tree__process-action--export"
-          onClick={(event) => {
-            event.stopPropagation();
-            onExportProcessConfig(processConfigId);
-          }}
-          aria-label={`Экспортировать процесс ${label}`}
-          title="Экспортировать процесс"
-        >
-          <Download01 aria-hidden size={15} />
-        </button>
-        <button
-          type="button"
-          className="process-tree__process-action process-tree__process-action--delete"
-          onClick={(event) => {
-            event.stopPropagation();
-            onDeleteProcessConfig(processConfigId);
-          }}
-          aria-label={`Удалить процесс ${label}`}
-          title="Удалить процесс"
-        >
-          <Trash01 aria-hidden size={15} />
-        </button>
-      </div>
-    );
-  };
-
-  const renderFolder = (folder, level, visitedFolderIds = new Set()) => {
-    if (visitedFolderIds.has(folder.id)) {
-      return null;
-    }
-
-    const nextVisited = new Set(visitedFolderIds);
-    nextVisited.add(folder.id);
-    const childFolders = foldersByParent.get(folder.id) ?? [];
-    const folderProcesses = processesByFolder.get(folder.id) ?? [];
-    const isExpanded = expandedFolderSet.has(folder.id);
-    const processCount = countProcessesInsideFolder(folder.id);
-    const isDropTarget = dropTargetFolderId === folder.id;
-    const hasChildren = folderHasChildren(folder.id);
-
-    return (
-      <div key={folder.id} className="process-tree__folder" role="treeitem" aria-expanded={isExpanded}>
-        <div
-          className={cn('process-tree__folder-row', isDropTarget && 'process-tree__drop-target')}
-          style={{ paddingLeft: `${0.45 + level * 0.9}rem` }}
-          onDragOver={(event) => handleDragOverFolder(event, folder.id)}
-          onDragLeave={() => setDropTargetFolderId(null)}
-          onDrop={(event) => handleDropOnFolder(event, folder.id)}
-        >
-          <button
-            type="button"
-            className="process-tree__toggle"
-            onClick={() => onToggleFolder(folder.id)}
-            aria-label={isExpanded ? `Свернуть папку ${folder.name}` : `Раскрыть папку ${folder.name}`}
-          >
-            <ChevronRight aria-hidden size={14} className={cn('process-tree__toggle-icon', isExpanded && 'process-tree__toggle-icon--open')} />
-          </button>
-          <button type="button" className="process-tree__folder-name" onClick={() => onToggleFolder(folder.id)}>
-            <Folder aria-hidden size={16} className="process-tree__item-icon process-tree__item-icon--folder" />
-            <span className="process-tree__item-text">
-              <span className="process-tree__item-title">{folder.name}</span>
-            </span>
-          </button>
-          <div className="process-tree__folder-actions">
-            <button
-              type="button"
-              className="process-tree__icon-button"
-              onClick={() => onCreateFolder(folder.id)}
-              aria-label={`Создать подпапку в ${folder.name}`}
-              title="Создать подпапку"
-            >
-              <FolderPlus aria-hidden size={15} />
-            </button>
-            <button
-              type="button"
-              className="process-tree__icon-button"
-              onClick={() => onRenameFolder(folder.id)}
-              aria-label={`Переименовать папку ${folder.name}`}
-              title="Переименовать"
-            >
-              <Edit02 aria-hidden size={15} />
-            </button>
-            <button
-              type="button"
-              className="process-tree__icon-button process-tree__icon-button--danger"
-              onClick={() => onDeleteFolder(folder.id)}
-              disabled={hasChildren}
-              aria-label={`Удалить папку ${folder.name}`}
-              title={hasChildren ? 'Удалить можно только пустую папку' : 'Удалить'}
-            >
-              <Trash01 aria-hidden size={15} />
-            </button>
-          </div>
-          <span className="process-tree__counter">{processCount}</span>
-        </div>
-        {isExpanded && (
-          <div className="process-tree__children" role="group">
-            {childFolders.map((childFolder) => renderFolder(childFolder, level + 1, nextVisited))}
-            {folderProcesses.map((processConfig) => renderProcess(processConfig, level + 1))}
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  const rootFolders = foldersByParent.get(ROOT_PROCESS_TREE_FOLDER_ID) ?? [];
-  const rootProcesses = processesByFolder.get(ROOT_PROCESS_TREE_FOLDER_ID) ?? [];
-  const rootProcessCount = processConfigs.length;
-  const isRootDropTarget = dropTargetFolderId === ROOT_PROCESS_TREE_FOLDER_ID;
-
-  return (
-    <div className="process-tree">
-      <div
-        className={cn('process-tree__root', isRootDropTarget && 'process-tree__drop-target')}
-        onDragOver={(event) => handleDragOverFolder(event, ROOT_PROCESS_TREE_FOLDER_ID)}
-        onDragLeave={() => setDropTargetFolderId(null)}
-        onDrop={(event) => handleDropOnFolder(event, ROOT_PROCESS_TREE_FOLDER_ID)}
-      >
-        <Inbox02 aria-hidden size={17} className="process-tree__item-icon" />
-        <div className="process-tree__root-title">
-          <span>Процессы</span>
-          <span>{rootProcessCount}</span>
-        </div>
-        <div className="process-tree__root-actions">
-          <button
-            type="button"
-            className="process-tree__icon-button process-tree__icon-button--strong"
-            onClick={onCreateProcess}
-            disabled={isCreateProcessDisabled}
-            aria-label="Создать процесс"
-            title="Создать процесс"
-          >
-            <svg
-              aria-hidden
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <path
-                d="M20 10.5V6.8C20 5.11984 20 4.27976 19.673 3.63803C19.3854 3.07354 18.9265 2.6146 18.362 2.32698C17.7202 2 16.8802 2 15.2 2H8.8C7.11984 2 6.27976 2 5.63803 2.32698C5.07354 2.6146 4.6146 3.07354 4.32698 3.63803C4 4.27976 4 5.11984 4 6.8V17.2C4 18.8802 4 19.7202 4.32698 20.362C4.6146 20.9265 5.07354 21.3854 5.63803 21.673C6.27976 22 7.11984 22 8.8 22H12M14 11H8M10 15H8M16 7H8M18 21V15M15 18H21"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </button>
-          <button
-            type="button"
-            className="process-tree__icon-button process-tree__icon-button--strong"
-            onClick={() => onCreateFolder(ROOT_PROCESS_TREE_FOLDER_ID)}
-            aria-label="Создать папку"
-            title="Создать папку"
-          >
-            <FolderPlus aria-hidden size={16} />
-          </button>
-          <button
-            type="button"
-            className="process-tree__icon-button process-tree__icon-button--strong"
-            onClick={onImportProcessConfig}
-            aria-label="Импортировать процесс"
-            title="Импортировать процесс"
-          >
-            <svg
-              aria-hidden
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <path
-                d="M20 12.5V6.8C20 5.11984 20 4.27976 19.673 3.63803C19.3854 3.07354 18.9265 2.6146 18.362 2.32698C17.7202 2 16.8802 2 15.2 2H8.8C7.11984 2 6.27976 2 5.63803 2.32698C5.07354 2.6146 4.6146 3.07354 4.32698 3.63803C4 4.27976 4 5.11984 4 6.8V17.2C4 18.8802 4 19.7202 4.32698 20.362C4.6146 20.9265 5.07354 21.3854 5.63803 21.673C6.27976 22 7.1198 22 8.79986 22H12.5M14 11H8M10 15H8M16 7H8M15 19L18 22M18 22L21 19M18 22V16"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </button>
-        </div>
-      </div>
-      <div className="process-tree__content" role="tree" aria-label="Дерево процессов">
-        {rootFolders.map((folder) => renderFolder(folder, 0))}
-        {rootProcesses.map((processConfig) => renderProcess(processConfig, 0))}
-        {processConfigs.length === 0 && (
-          <div className="process-tree__empty">Нет процессов</div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function ProcessCodeManagerModal({
-  isOpen,
-  codes,
-  codeUsage = new Map(),
-  isSubmitting,
-  errorMessage,
-  onClose,
-  onCreate,
-  onRename,
-  onDelete,
-  onError,
-}) {
-  const [newCode, setNewCode] = useState('');
-  const [draftCodes, setDraftCodes] = useState({});
-  const [localError, setLocalError] = useState('');
-  const codesSnapshot = codes.join('\u0000');
-
-  useEffect(() => {
-    if (!isOpen) {
-      return;
-    }
-
-    setNewCode('');
-    setLocalError('');
-    setDraftCodes(Object.fromEntries(codes.map((code) => [code, code])));
-  }, [codesSnapshot, isOpen]);
-
-  if (!isOpen) {
-    return null;
-  }
-
-  const sortedCodes = [...codes].sort((left, right) => left.localeCompare(right));
-  const codeSet = new Set(codes);
-  const visibleError = localError || errorMessage;
-  const showLocalError = (message) => {
-    setLocalError(message);
-    onError?.(message, message);
-  };
-
-  const validateUniqueCode = (value, currentCode = '') => {
-    const validationError = validateProcessCode(value);
-    if (validationError) {
-      return validationError;
-    }
-
-    const normalizedCode = normalizeProcessCode(value);
-    if (normalizedCode !== currentCode && codeSet.has(normalizedCode)) {
-      return `Код процесса "${normalizedCode}" уже существует.`;
-    }
-
-    return '';
-  };
-
-  const handleCreate = async (event) => {
-    event.preventDefault();
-    const validationError = validateUniqueCode(newCode);
-    if (validationError) {
-      showLocalError(validationError);
-      return;
-    }
-
-    setLocalError('');
-    const created = await onCreate(normalizeProcessCode(newCode));
-    if (created) {
-      setNewCode('');
-    }
-  };
-
-  const handleRename = async (currentCode) => {
-    const nextCode = normalizeProcessCode(draftCodes[currentCode] ?? currentCode);
-    const validationError = validateUniqueCode(nextCode, currentCode);
-    if (validationError) {
-      showLocalError(validationError);
-      return;
-    }
-
-    if (nextCode === currentCode) {
-      return;
-    }
-
-    setLocalError('');
-    await onRename(currentCode, nextCode);
-  };
-
-  const handleDelete = async (code) => {
-    const usage = codeUsage.get(code);
-    if (usage?.totalCount > 0) {
-      showLocalError(`Код процесса "${code}" нельзя удалить. ${formatProcessCodeUsage(usage)}.`);
-      return;
-    }
-
-    setLocalError('');
-    await onDelete(code);
-  };
-
-  return (
-    <div className="modal-shell" role="dialog" aria-modal="true" aria-labelledby="process-code-manager-title">
-      <div className="modal-shell__backdrop" onClick={isSubmitting ? undefined : onClose} />
-      <div className="modal-card process-code-modal">
-        <div className="modal-card__header">
-          <div>
-            <Title headingLevel="h3" className="modal-card__title" id="process-code-manager-title">
-              Код процесса
-            </Title>
-            <Text component="small" className="modal-card__subtitle">
-              Создавайте, переименовывайте и удаляйте неиспользуемые значения справочника contextCodesDictionaryList.
-            </Text>
-          </div>
-          <button
-            type="button"
-            className="modal-card__close"
-            onClick={onClose}
-            disabled={isSubmitting}
-            aria-label="Закрыть"
-          >
-            <XClose aria-hidden size={18} />
-          </button>
-        </div>
-
-        <form className="process-code-manager__create" onSubmit={handleCreate}>
-          <TextInput
-            value={newCode}
-            onChange={(_, value) => setNewCode(value)}
-            placeholder="Новый код"
-            maxLength={CONTEXT_CODE_MAX_LENGTH}
-            aria-label="Новый код процесса"
-          />
-          <Button type="submit" isLoading={isSubmitting} isDisabled={isSubmitting}>
-            Создать
-          </Button>
-        </form>
-
-        <div className="process-code-manager__list">
-          {sortedCodes.length === 0 ? (
-            <div className="process-code-manager__empty">Справочник кодов процесса пока пуст.</div>
-          ) : (
-            sortedCodes.map((code) => {
-              const draftValue = draftCodes[code] ?? code;
-              const normalizedDraftValue = normalizeProcessCode(draftValue);
-              const isChanged = normalizedDraftValue !== code;
-              const usage = codeUsage.get(code);
-              const isUsed = Boolean(usage?.totalCount);
-              const usageLabel = formatProcessCodeUsage(usage);
-
-              return (
-                <div key={code} className="process-code-manager__row">
-                  <TextInput
-                    value={draftValue}
-                    onChange={(_, value) =>
-                      setDraftCodes((current) => ({
-                        ...current,
-                        [code]: value,
-                      }))
-                    }
-                    maxLength={CONTEXT_CODE_MAX_LENGTH}
-                    aria-label={`Код процесса ${code}`}
-                  />
-                  <span
-                    className={cn(
-                      'process-code-manager__usage',
-                      !isUsed && 'process-code-manager__usage--free',
-                    )}
-                  >
-                    {usageLabel}
-                  </span>
-                  <Button
-                    variant="secondary"
-                    onClick={() => handleRename(code)}
-                    isDisabled={isSubmitting || !isChanged || !normalizedDraftValue}
-                  >
-                    Сохранить
-                  </Button>
-                  <Button
-                    variant="plain"
-                    className="process-code-manager__delete"
-                    onClick={() => handleDelete(code)}
-                    isDisabled={isSubmitting || isUsed}
-                    aria-label={`Удалить код процесса ${code}`}
-                    title={isUsed ? usageLabel : `Удалить код процесса ${code}`}
-                  >
-                    <Trash01 aria-hidden size={16} />
-                  </Button>
-                </div>
-              );
-            })
-          )}
-        </div>
-
-        {visibleError && <div className="process-code-manager__error">{visibleError}</div>}
-      </div>
-    </div>
-  );
-}
-
-export function App() {
+export function ProcessConfiguratorPage() {
   const { data, loading, error, refetch } = useQuery(PROCESS_FIELDS, {
     fetchPolicy: 'no-cache',
     notifyOnNetworkStatusChange: true,
@@ -4489,6 +2083,7 @@ export function App() {
   const [isProcessCodeManagerOpen, setIsProcessCodeManagerOpen] = useState(false);
   const [processCodeManagerError, setProcessCodeManagerError] = useState('');
   const [importFiles, setImportFiles] = useState([]);
+  const [importFileResults, setImportFileResults] = useState({});
   const [processEditorMode, setProcessEditorMode] = useState('VISUAL');
   const [yamlEditorText, setYamlEditorText] = useState('');
   const [yamlEditorBaseline, setYamlEditorBaseline] = useState('');
@@ -6058,6 +3653,7 @@ export function App() {
   const handleOpenImportModal = () => {
     setImportErrorMessage('');
     setImportFiles([]);
+    setImportFileResults({});
     setIsImportModalOpen(true);
   };
 
@@ -6068,13 +3664,14 @@ export function App() {
 
     setIsImportModalOpen(false);
     setImportFiles([]);
+    setImportFileResults({});
     setImportErrorMessage('');
   };
 
   const handleOpenJsonLogicPlayground = (title, ruleText) => {
     setJsonLogicPlaygroundTitle(title);
     setJsonLogicPlaygroundInput('{}');
-    setJsonLogicPlaygroundRule(formatJsonSnippet(ruleText || '{}'));
+    setJsonLogicPlaygroundRule(formatCompactJsonLogicSnippet(ruleText || '{}'));
     setJsonLogicPlaygroundResult('');
     setJsonLogicPlaygroundError('');
     setIsJsonLogicPlaygroundOpen(true);
@@ -6144,12 +3741,43 @@ export function App() {
     setImportFiles((current) => {
       const nextByKey = new Map(current.map((file) => [getImportFileKey(file), file]));
       yamlFiles.forEach((file) => nextByKey.set(getImportFileKey(file), file));
-      return Array.from(nextByKey.values());
+      const nextFiles = Array.from(nextByKey.values());
+      const nextKeys = new Set(nextFiles.map(getImportFileKey));
+
+      setImportFileResults((currentResults) =>
+        Object.fromEntries(Object.entries(currentResults).filter(([fileKey]) => nextKeys.has(fileKey))),
+      );
+
+      return nextFiles;
     });
   };
 
   const handleRemoveImportFile = (index) => {
-    setImportFiles((current) => current.filter((_, fileIndex) => fileIndex !== index));
+    setImportFiles((current) => {
+      const removedFile = current[index];
+      const nextFiles = current.filter((_, fileIndex) => fileIndex !== index);
+      if (removedFile) {
+        const removedFileKey = getImportFileKey(removedFile);
+        setImportFileResults((currentResults) => {
+          const nextResults = { ...currentResults };
+          delete nextResults[removedFileKey];
+          return nextResults;
+        });
+      }
+      return nextFiles;
+    });
+  };
+
+  const handleShowImportFileError = (file, result) => {
+    const filePath = getImportFilePath(file);
+    const message = result?.error || `Не удалось импортировать файл ${filePath}.`;
+
+    setErrorDetails(
+      createErrorInfo(message, message, {
+        title: 'Ошибка импорта',
+        message: `Файл ${filePath} не импортирован.`,
+      }),
+    );
   };
 
   const handleEvaluateJsonLogic = async () => {
@@ -6368,6 +3996,7 @@ export function App() {
 
     try {
       setImportErrorMessage('');
+      setImportFileResults({});
       setIsImportingProcessConfig(true);
 
       const formData = new FormData();
@@ -6387,26 +4016,72 @@ export function App() {
 
       const payload = await response.json();
       const imported = Array.isArray(payload?.imported) ? payload.imported : [];
+      const failed = Array.isArray(payload?.failed) ? payload.failed : [];
       const lastImported = imported[imported.length - 1] ?? null;
+      const importedByFilename = new Map(
+        imported.map((item: any) => [item.filename, item] as [string, any]),
+      );
+      const failedByFilename = new Map(
+        failed.map((item: any) => [item.filename, item] as [string, any]),
+      );
 
-      await refetch();
+      setImportFileResults(
+        Object.fromEntries(
+          importFiles.map((file) => {
+            const filePath = getImportFilePath(file);
+            const fileKey = getImportFileKey(file);
+            const failedResult = failedByFilename.get(filePath) as any;
+            if (failedResult) {
+              return [
+                fileKey,
+                {
+                  status: 'error',
+                  error: failedResult.error || 'Не удалось импортировать файл.',
+                },
+              ];
+            }
 
-      if (lastImported?.processConfigId) {
-        setSelectedConfigId(lastImported.processConfigId);
-        setSelectedNodeId(lastImported.processId ? `process:${lastImported.processId}` : null);
-        setEditorNodeId(lastImported.processId ? `process:${lastImported.processId}` : null);
-        setViewerNodeId(null);
-        setOrderNodeId(null);
-        setIsEditorOpen(Boolean(lastImported.processId));
+            if (importedByFilename.has(filePath)) {
+              return [fileKey, { status: 'success' }];
+            }
+
+            return [fileKey, { status: 'idle' }];
+          }),
+        ),
+      );
+
+      if (imported.length > 0) {
+        await refetch();
       }
 
-      showSuccessToast(
-        'Импорт завершён',
-        imported.length > 1
-          ? `Создано процессов: ${imported.length}.`
-          : `Файл ${imported[0]?.filename ?? 'YAML'} успешно импортирован.`,
-      );
-      handleCloseImportModal(true);
+      const lastImportedProcessConfigId = getImportedProcessConfigId(lastImported);
+      const lastImportedProcessId = getImportedProcessId(lastImported);
+
+      if (lastImportedProcessConfigId) {
+        setSelectedConfigId(lastImportedProcessConfigId);
+        setSelectedNodeId(lastImportedProcessId ? `process:${lastImportedProcessId}` : null);
+        setEditorNodeId(lastImportedProcessId ? `process:${lastImportedProcessId}` : null);
+        setViewerNodeId(null);
+        setOrderNodeId(null);
+        setIsEditorOpen(Boolean(lastImportedProcessId));
+      }
+
+      if (imported.length > 0) {
+        showSuccessToast(
+          'Импорт завершён',
+          failed.length > 0
+            ? `Создано процессов: ${imported.length}. Не импортировано файлов: ${failed.length}.`
+            : imported.length > 1
+              ? `Создано процессов: ${imported.length}.`
+              : `Файл ${imported[0]?.filename ?? 'YAML'} успешно импортирован.`,
+        );
+      }
+
+      if (imported.length === 0 && failed.length > 0) {
+        setImportErrorMessage('Не удалось импортировать выбранные YAML-файлы. Ошибки отмечены в списке.');
+      } else if (failed.length > 0) {
+        setImportErrorMessage('Часть YAML-файлов не импортирована. Нажмите на иконку ошибки рядом с файлом.');
+      }
     } catch (requestError) {
       reportError(setImportErrorMessage, requestError, 'Не удалось импортировать YAML-файлы.');
     } finally {
@@ -6685,7 +4360,7 @@ export function App() {
             <div className="editor-drawer__body">
               <NodeEditor
                 ref={nodeEditorRef}
-                processConfig={activeProcessConfig}
+                selected={findSelectedNode(activeProcessConfig, editorNodeId)}
                 selectedNodeId={editorNodeId}
                 onSave={handleSaveNode}
                 onDraftChange={(values) => setEditorPreview(values ? { nodeId: editorNodeId, values } : null)}
@@ -6700,6 +4375,11 @@ export function App() {
                 slaDurationUnitOptions={slaDurationUnitOptions}
                 slaStatusOptions={slaStatusOptions}
                 isSaving={editorIsSaving}
+                getNodeSavePayload={getNodeSavePayload}
+                getNodePreviewPayload={getNodePreviewPayload}
+                updateNestedValue={updateNestedValue}
+                updateItemAt={updateItemAt}
+                sanitizeInputScenarios={sanitizeInputScenarios}
               />
             </div>
           </aside>
@@ -6754,23 +4434,27 @@ export function App() {
             </div>
             <div className="editor-drawer__body">
               <NodeOrderEditor
-                processConfig={activeProcessConfig}
+                selected={findSelectedNode(activeProcessConfig, orderNodeId)}
                 selectedNodeId={orderNodeId}
                 onReorderStages={handleReorderStages}
                 onReorderReverseOutputs={handleReorderReverseOutputs}
                 isSaving={editorIsSaving}
+                reorderItems={reorderItems}
+                formatReverseOutputEventType={formatReverseOutputEventType}
               />
             </div>
           </aside>
           <FileUploadModal
             isOpen={isImportModalOpen}
             files={importFiles}
+            fileResults={importFileResults}
             isSubmitting={isImportingProcessConfig}
             errorMessage={importErrorMessage}
             onClose={handleCloseImportModal}
             onSubmit={handleImportProcessConfigs}
             onFilesSelected={handleImportFilesSelected}
             onRemoveFile={handleRemoveImportFile}
+            onShowFileError={handleShowImportFileError}
           />
           <ExportTypeModal
             isOpen={isExportModalOpen}

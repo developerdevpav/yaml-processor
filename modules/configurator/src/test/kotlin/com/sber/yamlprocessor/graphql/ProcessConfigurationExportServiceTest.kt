@@ -3,6 +3,7 @@ package com.sber.yamlprocessor.graphql
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.PropertyNamingStrategies
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
+import com.sber.yamlprocessor.jsonlogic.JsonLogicFormattingService
 import com.sber.yamlprocessor.model.Configurator
 import com.sber.yamlprocessor.model.Process
 import com.sber.yamlprocessor.model.ProcessConfig
@@ -34,7 +35,12 @@ class ProcessConfigurationExportServiceTest {
         .findAndRegisterModules()
         .registerKotlinModule()
         .setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
-    private val exportService = ProcessConfigurationExportService(crudService, objectMapper, YamlFormattingService())
+    private val exportService = ProcessConfigurationExportService(
+        crudService,
+        objectMapper,
+        YamlFormattingService(),
+        JsonLogicFormattingService(objectMapper)
+    )
 
     @Test
     fun `exports filter event rule as literal block scalar`() {
@@ -116,6 +122,74 @@ class ProcessConfigurationExportServiceTest {
         assertFalse(exported.content.contains("type: null"), exported.content)
         assertFalse(exported.content.contains("journal-service-name: null"), exported.content)
         assertFalse(exported.content.contains("status: null"), exported.content)
+    }
+
+    @Test
+    fun `exports json logic rules in compact literal block scalar`() {
+        val rule = """
+            {
+              "and": [
+                {
+                  "some": [
+                    {
+                      "var": "events"
+                    },
+                    {
+                      "==": [
+                        {
+                          "var": "body.service.scenario"
+                        },
+                        "DealStructuring"
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "some": [
+                    {
+                      "var": "events"
+                    },
+                    {
+                      "==": [
+                        {
+                          "var": "body.service.scenario"
+                        },
+                        "DealStructuringTwo"
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+        """.trimIndent()
+
+        val configurator = Configurator(filterEventRule = rule)
+        val stage = Stage(configurator = configurator)
+        configurator.stage = stage
+        val subprocessNode = Subprocess(trigger = Trigger(rule = rule))
+        stage.subprocess = subprocessNode
+        subprocessNode.stages = mutableListOf(stage)
+
+        val processConfig = ProcessConfig().apply {
+            process = Process(processConfig = this, nodeName = "process_json_logic").apply {
+                subprocessNode.process = this
+                subprocess = mutableListOf(subprocessNode)
+            }
+        }
+
+        given(crudService.findProcessConfigForExport("config-json-logic")).willReturn(processConfig)
+
+        val exported = exportService.exportProcessConfig("config-json-logic")
+
+        assertTrue(exported.content.contains("""{ "var": "events" }"""), exported.content)
+        assertTrue(
+            exported.content.contains(
+                """{ "==": [ { "var": "body.service.scenario" }, "DealStructuring" ] }"""
+            ),
+            exported.content
+        )
+        assertTrue(exported.content.contains("filter-event-rule: |-"), exported.content)
+        assertFalse(exported.content.contains("\n          \"var\": \"events\""), exported.content)
     }
 
 }

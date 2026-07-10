@@ -1,9 +1,9 @@
-import { Check, FolderPlus, Play, Plus, Trash01, XClose, ZapCircle } from '@untitledui/icons';
+import { AlertCircle, Check, CheckVerified02, FolderPlus, Play, Plus, Trash01, XClose, ZapCircle } from '@untitledui/icons';
 import { useEffect, useRef, useState } from 'react';
 import { Button, Text, Title } from '../ui/AppPrimitives';
-import { cn, formatJsonSnippet } from '../../utils/ui';
+import { cn, formatCompactJsonLogicSnippet, formatJsonSnippet } from '../../utils/ui';
 
-function useEscapeKey(isOpen, onClose) {
+function useEscapeKey(isOpen: boolean, onClose: () => void) {
   useEffect(() => {
     if (!isOpen) {
       return undefined;
@@ -31,7 +31,7 @@ export function JsonSnippetEditor({
   onOpenPlayground,
   playgroundLabel = 'Открыть playground JsonLogic',
   showLineNumbers = false,
-}) {
+}: any) {
   const containerRef = useRef(null);
   const lineNumberGutterRef = useRef(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -135,13 +135,15 @@ export function JsonSnippetEditor({
 export function FileUploadModal({
   isOpen,
   files,
+  fileResults = {},
   isSubmitting,
   errorMessage,
   onClose,
   onSubmit,
   onFilesSelected,
   onRemoveFile,
-}) {
+  onShowFileError,
+}: any) {
   const inputRef = useRef(null);
   const directoryInputRef = useRef(null);
   useEscapeKey(isOpen, onClose);
@@ -159,10 +161,11 @@ export function FileUploadModal({
   };
 
   const getFilePath = (file) => file.webkitRelativePath || file.name;
+  const getFileKey = (file) => `${getFilePath(file)}:${file?.size ?? 0}:${file?.lastModified ?? 0}`;
 
   const handleDrop = (event) => {
     event.preventDefault();
-    const nextFiles = Array.from(event.dataTransfer?.files ?? []).filter((file) => /\.ya?ml$/i.test(file.name));
+    const nextFiles = Array.from<File>(event.dataTransfer?.files ?? []).filter((file) => /\.ya?ml$/i.test(file.name));
     if (nextFiles.length > 0) {
       onFilesSelected(nextFiles);
     }
@@ -171,7 +174,7 @@ export function FileUploadModal({
   return (
     <div className="modal-shell" role="dialog" aria-modal="true" aria-labelledby="yaml-import-title">
       <div className="modal-shell__backdrop" onClick={onClose} />
-      <div className="modal-card">
+      <div className="modal-card file-upload-modal__card">
         <div className="modal-card__header">
           <div>
             <Title headingLevel="h4" className="modal-card__title">
@@ -186,56 +189,81 @@ export function FileUploadModal({
           </button>
         </div>
 
-        <div className="file-uploader" onDragOver={(event) => event.preventDefault()} onDrop={handleDrop}>
-          <div className="file-uploader__icon">
-            <Plus aria-hidden size={20} />
+        <div className="file-upload-modal__body">
+          <div className="file-uploader" onDragOver={(event) => event.preventDefault()} onDrop={handleDrop}>
+            <div className="file-uploader__icon">
+              <Plus aria-hidden size={20} />
+            </div>
+            <div className="file-uploader__title">Перетащите YAML сюда</div>
+            <div className="file-uploader__subtitle">или выберите файлы/директорию вручную</div>
+            <div className="file-uploader__actions">
+              <Button variant="secondary" onClick={() => inputRef.current?.click()}>
+                Выбрать файлы
+              </Button>
+              <Button variant="secondary" onClick={() => directoryInputRef.current?.click()}>
+                <FolderPlus aria-hidden size={16} />
+                Выбрать директорию
+              </Button>
+            </div>
+            <input ref={inputRef} type="file" hidden multiple accept=".yaml,.yml" onChange={handleFileChange} />
+            <input
+              ref={directoryInputRef}
+              type="file"
+              hidden
+              multiple
+              accept=".yaml,.yml"
+              {...({ directory: '', webkitdirectory: '' } as any)}
+              onChange={handleFileChange}
+            />
           </div>
-          <div className="file-uploader__title">Перетащите YAML сюда</div>
-          <div className="file-uploader__subtitle">или выберите файлы/директорию вручную</div>
-          <div className="file-uploader__actions">
-            <Button variant="secondary" onClick={() => inputRef.current?.click()}>
-              Выбрать файлы
-            </Button>
-            <Button variant="secondary" onClick={() => directoryInputRef.current?.click()}>
-              <FolderPlus aria-hidden size={16} />
-              Выбрать директорию
-            </Button>
-          </div>
-          <input ref={inputRef} type="file" hidden multiple accept=".yaml,.yml" onChange={handleFileChange} />
-          <input
-            ref={directoryInputRef}
-            type="file"
-            hidden
-            multiple
-            accept=".yaml,.yml"
-            directory=""
-            webkitdirectory=""
-            onChange={handleFileChange}
-          />
+
+          {files.length > 0 && (
+            <div className="file-uploader__list">
+              {files.map((file, index) => {
+                const filePath = getFilePath(file);
+                const fileResult = fileResults[getFileKey(file)];
+
+                return (
+                  <div key={`${filePath}-${file.size}-${file.lastModified}-${index}`} className="file-uploader__item">
+                    <div>
+                      <div className="file-uploader__filename">{filePath}</div>
+                      <div className="file-uploader__meta">{Math.max(1, Math.round(file.size / 1024))} KB</div>
+                    </div>
+                    <div className="file-uploader__item-actions">
+                      {fileResult?.status === 'success' && (
+                        <span className="file-uploader__status file-uploader__status--success" title="Файл импортирован">
+                          <CheckVerified02 aria-hidden size={18} />
+                        </span>
+                      )}
+                      {fileResult?.status === 'error' && (
+                        <button
+                          type="button"
+                          className="file-uploader__status file-uploader__status--error"
+                          onClick={() => onShowFileError?.(file, fileResult)}
+                          aria-label={`Показать ошибку импорта ${file.name}`}
+                          title="Показать ошибку импорта"
+                        >
+                          <AlertCircle aria-hidden size={18} />
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="file-uploader__remove"
+                        onClick={() => onRemoveFile(index)}
+                        aria-label={`Удалить ${file.name}`}
+                        disabled={isSubmitting}
+                      >
+                        <XClose aria-hidden size={16} />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {errorMessage && <div className="file-uploader__error">{errorMessage}</div>}
         </div>
-
-        {files.length > 0 && (
-          <div className="file-uploader__list">
-            {files.map((file, index) => (
-              <div key={`${getFilePath(file)}-${file.size}-${file.lastModified}-${index}`} className="file-uploader__item">
-                <div>
-                  <div className="file-uploader__filename">{getFilePath(file)}</div>
-                  <div className="file-uploader__meta">{Math.max(1, Math.round(file.size / 1024))} KB</div>
-                </div>
-                <button
-                  type="button"
-                  className="file-uploader__remove"
-                  onClick={() => onRemoveFile(index)}
-                  aria-label={`Удалить ${file.name}`}
-                >
-                  <XClose aria-hidden size={16} />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {errorMessage && <div className="file-uploader__error">{errorMessage}</div>}
 
         <div className="modal-card__footer">
           <Button variant="secondary" onClick={onClose} isDisabled={isSubmitting}>
@@ -256,7 +284,7 @@ export function ExportTypeModal({
   errorMessage,
   onClose,
   onSubmit,
-}) {
+}: any) {
   useEscapeKey(isOpen, onClose);
 
   if (!isOpen) {
@@ -306,7 +334,7 @@ export function JsonLogicPlaygroundModal({
   onInputChange,
   onRuleChange,
   onEvaluate,
-}) {
+}: any) {
   useEscapeKey(isOpen, onClose);
 
   if (!isOpen) {
@@ -362,7 +390,7 @@ export function JsonLogicPlaygroundModal({
               id="jsonlogic-playground-rule"
               value={ruleText}
               onChange={onRuleChange}
-              onBeautify={() => onRuleChange(formatJsonSnippet(ruleText))}
+              onBeautify={() => onRuleChange(formatCompactJsonLogicSnippet(ruleText))}
               helperText="Укажите JsonLogic правило в формате JSON."
               showLineNumbers
             />
@@ -377,7 +405,7 @@ function formatEventCount(count) {
   return `${count ?? 0} событ.`;
 }
 
-function ProcessPlaygroundNode({ label, meta, children, autoMatched = false, isProcess = false, onSelect }) {
+function ProcessPlaygroundNode({ label, meta, children, autoMatched = false, isProcess = false, onSelect }: any) {
   const childItems = Array.isArray(children) ? children.filter(Boolean) : children;
   const hasChildren = Array.isArray(childItems) ? childItems.length > 0 : Boolean(childItems);
   const labelClassName = cn('process-playground-tree__label', isProcess && 'process-playground-tree__label--process');
@@ -403,7 +431,7 @@ function ProcessPlaygroundNode({ label, meta, children, autoMatched = false, isP
   );
 }
 
-function ProcessPlaygroundTree({ result, onSelectNode }) {
+function ProcessPlaygroundTree({ result, onSelectNode }: any) {
   if (!result) {
     return (
       <div className="process-playground__result process-playground__result--empty">
@@ -413,7 +441,7 @@ function ProcessPlaygroundTree({ result, onSelectNode }) {
   }
 
   const hasMatches = (result.processes ?? []).length > 0;
-  const getSelectHandler = (item, fallbackProcessConfigId) =>
+  const getSelectHandler = (item, fallbackProcessConfigId = undefined) =>
     onSelectNode && item?.nodeId
       ? () =>
           onSelectNode({
@@ -479,7 +507,7 @@ function ProcessPlaygroundTree({ result, onSelectNode }) {
   );
 }
 
-function ProcessPlaygroundHistory({ items = [], onSelectItem, onRemoveItem, onClear }) {
+function ProcessPlaygroundHistory({ items = [], onSelectItem, onRemoveItem, onClear }: any) {
   const hasItems = items.length > 0;
 
   return (
@@ -539,7 +567,7 @@ export function ProcessPlaygroundModal({
   onClearTriggerHistory,
   onRemoveTriggerHistoryItem,
   onSelectNode,
-}) {
+}: any) {
   useEscapeKey(isOpen, onClose);
   const [activeTab, setActiveTab] = useState('trigger');
 
@@ -660,7 +688,7 @@ export function FlowProcessPlaygroundModal({
   onClose,
   onTriggerChange,
   onEvaluate,
-}) {
+}: any) {
   useEscapeKey(isOpen, onClose);
 
   if (!isOpen) {

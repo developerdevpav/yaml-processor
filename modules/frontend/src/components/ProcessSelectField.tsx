@@ -30,13 +30,13 @@ function itemClassName({ isFocused, isSelected }) {
  */
 export function ProcessSelectField({
   id,
-  className,
+  className = '',
   value,
   onChange,
   options,
   placeholder,
   isDisabled = false,
-}) {
+}: any) {
   const selectedKey = value ? value : EMPTY_KEY;
   const normalizedOptions = options.map((option) =>
     typeof option === 'string' ? { value: option, label: option } : option
@@ -51,7 +51,6 @@ export function ProcessSelectField({
         const next = key == null ? EMPTY_KEY : String(key);
         onChange(next === EMPTY_KEY ? '' : next);
       }}
-      disallowEmptySelection
       placeholder={placeholder}
       isDisabled={isDisabled}
     >

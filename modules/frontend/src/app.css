@@ -486,7 +486,8 @@ body {
 }
 
 .topology-editor-mode,
-.topology-flow-actions {
+.topology-flow-actions,
+.yaml-process-editor__button-group {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
@@ -788,29 +789,25 @@ body {
   min-width: 0;
 }
 
-.yaml-process-editor__status {
-  color: #667085;
-  font-size: 0.8rem;
-  font-weight: 600;
-  white-space: nowrap;
+.yaml-process-editor__button-group {
+  flex: 0 0 auto;
 }
 
 .yaml-process-editor__icon-button {
   display: inline-grid;
   place-items: center;
-  width: 2.5rem;
-  height: 2.5rem;
-  border: 1px solid #d0d5dd;
-  border-radius: 0.65rem;
-  background: #ffffff;
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 0;
+  border-radius: 0.55rem;
+  background: transparent;
   color: #344054;
   cursor: pointer;
-  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+  transition: background-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
 }
 
 .yaml-process-editor__icon-button:hover:not(:disabled) {
-  border-color: #b8c4d6;
-  background: #f8fafc;
+  background: #f2f4f7;
   color: #101828;
 }
 
@@ -1209,6 +1206,18 @@ body {
   text-align: center;
 }
 
+.file-upload-modal__card {
+  max-height: min(46rem, calc(100vh - 3rem));
+  display: flex;
+  flex-direction: column;
+}
+
+.file-upload-modal__body {
+  min-height: 0;
+  overflow: auto;
+  padding-right: 0.25rem;
+}
+
 .file-uploader__icon {
   display: inline-flex;
   align-items: center;
@@ -1245,6 +1254,9 @@ body {
   display: grid;
   gap: 0.75rem;
   margin-top: 1rem;
+  max-height: min(38vh, 20rem);
+  overflow: auto;
+  padding-right: 0.25rem;
 }
 
 .file-uploader__item {
@@ -1260,6 +1272,38 @@ body {
 
 .file-uploader__item > div {
   min-width: 0;
+}
+
+.file-uploader__item-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 0 0 auto;
+}
+
+.file-uploader__status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border: 0;
+  border-radius: 999px;
+  background: #f8fafc;
+}
+
+button.file-uploader__status {
+  cursor: pointer;
+}
+
+.file-uploader__status--success {
+  background: #ecfdf3;
+  color: #027a48;
+}
+
+.file-uploader__status--error {
+  background: #fef3f2;
+  color: #b42318;
 }
 
 .file-uploader__filename {
@@ -1286,6 +1330,11 @@ body {
   background: #f8fafc;
   color: #475467;
   cursor: pointer;
+}
+
+.file-uploader__remove:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .file-uploader__error {
@@ -2955,10 +3004,6 @@ body {
 
   .yaml-process-editor__actions {
     flex-wrap: wrap;
-  }
-
-  .yaml-process-editor__status {
-    white-space: normal;
   }
 
   .modal-shell-playground {

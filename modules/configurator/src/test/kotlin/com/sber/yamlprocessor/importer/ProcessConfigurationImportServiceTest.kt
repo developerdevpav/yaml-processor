@@ -106,6 +106,87 @@ class ProcessConfigurationImportServiceTest {
     }
 
     @Test
+    fun `compacts json logic rules on import`() {
+        val expandedRule = """
+            {
+              "and": [
+                {
+                  "some": [
+                    {
+                      "var": "events"
+                    },
+                    {
+                      "==": [
+                        {
+                          "var": "body.service.scenario"
+                        },
+                        "DealStructuring"
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+        """.trimIndent()
+        val file = MockMultipartFile(
+            "files",
+            "process.yaml",
+            "application/yaml",
+            """
+            process:
+              context-code: PSPLUS
+              subprocess:
+                - trigger:
+                    rule: |-
+${expandedRule.prependIndent("                      ")}
+                  stages:
+                    - executor: executor.alpha
+                      configurator:
+                        filter-event-rule: |-
+${expandedRule.prependIndent("                          ")}
+                        result:
+                          - reverse:
+                              - status: INITIATED
+                                output:
+                                  - phase: START
+                                    rule: |-
+${expandedRule.prependIndent("                                      ")}
+                                    body:
+                                      service:
+                                        scenario: scenario_a
+            """.trimIndent().toByteArray()
+        )
+
+        val imported = importService.import(listOf(file)).single()
+        entityManager.flush()
+        entityManager.clear()
+
+        val processConfig = entityManager.find(
+            com.sber.yamlprocessor.model.ProcessConfig::class.java,
+            imported.processConfigId
+        )
+        val subprocess = processConfig.process?.subprocess?.single()
+        val configurator = subprocess?.stages?.single()?.configurator
+        val output = configurator?.result?.single()?.reverse?.single()?.output?.single()
+        val expectedRule = """
+            {
+              "and": [
+                {
+                  "some": [
+                    { "var": "events" },
+                    { "==": [ { "var": "body.service.scenario" }, "DealStructuring" ] }
+                  ]
+                }
+              ]
+            }
+        """.trimIndent()
+
+        assertEquals(expectedRule, subprocess?.trigger?.rule)
+        assertEquals(expectedRule, configurator?.filterEventRule)
+        assertEquals(expectedRule, output?.rule)
+    }
+
+    @Test
     fun `replaces existing process config from yaml text`() {
         val file = MockMultipartFile(
             "files",

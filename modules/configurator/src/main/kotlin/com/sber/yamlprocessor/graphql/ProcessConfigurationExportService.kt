@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.ArrayNode
 import com.fasterxml.jackson.databind.node.ObjectNode
 import com.fasterxml.jackson.dataformat.yaml.YAMLMapper
+import com.sber.yamlprocessor.jsonlogic.JsonLogicFormattingService
 import com.sber.yamlprocessor.model.Process
 import com.sber.yamlprocessor.yaml.YamlFormattingService
 import org.springframework.stereotype.Service
@@ -26,7 +27,8 @@ data class ProcessConfigurationExport(
 class ProcessConfigurationExportService(
     private val crudService: JpaGraphQlCrudService,
     private val objectMapper: ObjectMapper,
-    private val yamlFormattingService: YamlFormattingService
+    private val yamlFormattingService: YamlFormattingService,
+    private val jsonLogicFormattingService: JsonLogicFormattingService
 ) {
     private val yamlMapper = YAMLMapper()
     private val yaml = Yaml(FilterEventRuleRepresenter(), DumperOptions().apply {
@@ -105,8 +107,8 @@ class ProcessConfigurationExportService(
                 val text = node.textValue()
                 if (text.trim().isEmpty()) {
                     null
-                } else if (requiresLiteralStyle(fieldName, parentPath)) {
-                    LiteralString(text)
+                } else if (requiresJsonLogicLiteralStyle(fieldName, parentPath)) {
+                    LiteralString(jsonLogicFormattingService.format(text))
                 } else {
                     text
                 }
@@ -117,7 +119,7 @@ class ProcessConfigurationExportService(
             else -> yamlMapper.treeToValue(node, Any::class.java)
         }
 
-    private fun requiresLiteralStyle(fieldName: String?, path: List<String>): Boolean =
+    private fun requiresJsonLogicLiteralStyle(fieldName: String?, path: List<String>): Boolean =
         fieldName == "filter-event-rule" ||
             path.takeLast(2) == listOf("trigger", "rule") ||
             path.takeLast(2) == listOf("output", "rule")
